@@ -22,7 +22,7 @@ func NewKoreaLocation() *time.Location {
 }
 
 func ValToIdx[T constraints.Integer](v T) []int {
-	var ret []int
+	ret := make([]int, 0)
 	i := 0
 	for v > 0 {
 		if (v & (1 << i)) != 0 {
