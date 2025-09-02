@@ -145,7 +145,7 @@ func ConvertDecimal[T Number](t T, p, s int) T {
  * @param endIdx int - 종료 필드 인덱스 (-1이면 마지막까지)
  * @param params ...interface{} - 순차적으로 적용할 값들
  */
-func ModifyStructByIndex(s interface{}, startIdx int, endIdx int, params ...interface{}) error {
+func ModifyStructByIndex(s interface{}, startIdx int, endIdx int, params []interface{}) error {
 	v := reflect.ValueOf(s)
 
 	// 포인터가 아니면 수정 불가
