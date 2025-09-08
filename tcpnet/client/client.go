@@ -50,7 +50,7 @@ func (c *ClientBase) SetConnectionState(state bool) {
 
 func (c *ClientBase) IsConnected() bool {
 	c.mu.RLock()
-	defer c.mu.Unlock()
+	defer c.mu.RUnlock()
 	return c.isConnected
 }
 
