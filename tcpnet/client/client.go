@@ -31,7 +31,7 @@ type ClientBase struct {
 	heartbeat      time.Duration
 }
 
-func NewTCPClient(ctx context.Context, connectTimeout, heartbeat time.Duration) (*ClientBase, error) {
+func NewClientBase(ctx context.Context, connectTimeout, heartbeat time.Duration) (*ClientBase, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	return &ClientBase{
 		//reader:      bufio.NewReader(os.Stdin),
