@@ -11,8 +11,8 @@ import (
 
 type ServerBase struct {
 	listener net.Listener
-	Ip       string
-	Port     string
+	ip       string
+	port     string
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -22,7 +22,7 @@ type ServerBase struct {
 	isListening bool
 	heartbeat   time.Duration
 
-	HandleConnectFunc func(conn net.Conn)
+	handleConnectFunc func(conn net.Conn)
 
 	timeOutCnt    int
 	maxTimeOutCnt int
@@ -54,27 +54,27 @@ func (s *ServerBase) SetListeningState(state bool) {
 func (s *ServerBase) SetIpAndPort(ip, port string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.Ip = ip
-	s.Port = port
+	s.ip = ip
+	s.port = port
 }
 
 // 연결된 클라이언트를 어떻게 관리할 것인지 구현해야 함.
 func (s *ServerBase) SetHandleConnectFunc(f func(conn net.Conn)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.HandleConnectFunc = f
+	s.handleConnectFunc = f
 }
 
 func (s *ServerBase) Listening() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.Ip == "" || s.Port == "" {
+	if s.ip == "" || s.port == "" {
 		return fmt.Errorf("need ip and port, call SetIpAndPort.")
 	}
 
 	if s.listener == nil {
-		listener, err := net.Listen("tcp", fmt.Sprintf("%s:%s", s.Ip, s.Port))
+		listener, err := net.Listen("tcp", fmt.Sprintf(`%s:%s`, s.ip, s.port))
 		if err != nil {
 			return err
 		}
@@ -92,7 +92,7 @@ func (s *ServerBase) Start() error {
 		return err
 	}
 
-	if s.HandleConnectFunc == nil {
+	if s.handleConnectFunc == nil {
 		return fmt.Errorf("HandleConnectFunc is nil.")
 	}
 
@@ -133,7 +133,7 @@ func (s *ServerBase) WaitForAccept() error {
 			continue
 		}
 		s.wg.Add(1)
-		go s.HandleConnectFunc(conn)
+		go s.handleConnectFunc(conn)
 	}
 }
 
@@ -194,7 +194,7 @@ func (s *ServerBase) CheckConnection() bool {
 		return false
 	}
 
-	testConn, err := net.DialTimeout("tcp", "localhost:5000", 300*time.Millisecond)
+	testConn, err := net.DialTimeout("tcp", fmt.Sprintf(`%s:%s`, s.ip, s.port), 300*time.Millisecond)
 	if err != nil {
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 			if s.timeOutCnt >= s.maxTimeOutCnt {
