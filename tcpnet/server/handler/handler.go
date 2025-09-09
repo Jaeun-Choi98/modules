@@ -10,6 +10,7 @@ import (
 
 var (
 	errNotExistsHandlerType = errors.New("not exsits registered handler about packet.GetPacketId")
+	ErrNilHandler           = errors.New("nil handler")
 )
 
 type TypeHandlerInterface interface {
@@ -47,6 +48,10 @@ func (h *HandlerManager) HandleMessage(parseMsg tcpmd.ParseMsg, replyCh map[tcpm
 
 	if !exists {
 		return errNotExistsHandlerType
+	}
+
+	if handler == nil {
+		return ErrNilHandler
 	}
 
 	go func() {
