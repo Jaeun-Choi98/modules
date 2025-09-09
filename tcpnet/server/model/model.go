@@ -2,7 +2,7 @@ package model
 
 type Reply interface {
 	GetPayload() any
-	GetError() error
+	GetErr() error
 }
 
 type ReplyCode interface {
