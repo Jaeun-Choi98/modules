@@ -36,27 +36,32 @@ func (r *GenericReply[T]) GetErr() error {
 	return r.Err
 }
 
-type Packet interface {
+type ParseMsg interface {
+	GetClientId() uint32
 	GetPacketId() any
 	GetPacket() any
 }
 
-type GenericPacket[T, K any] struct {
+type GenericParseMsg[T, K any] struct {
 	ClientId uint32
 	packetId T
 	packet   K
 }
 
-func (p *GenericPacket[T, K]) AddPacket(packetId T, packet K) *GenericPacket[T, K] {
+func (p *GenericParseMsg[T, K]) AddPacket(packetId T, packet K) *GenericParseMsg[T, K] {
 	p.packet = packet
 	p.packetId = packetId
 	return p
 }
 
-func (p *GenericPacket[T, K]) GetPacketId() any {
+func (p *GenericParseMsg[T, K]) GetClientId() uint32 {
+	return p.ClientId
+}
+
+func (p *GenericParseMsg[T, K]) GetPacketId() any {
 	return p.packetId
 }
 
-func (p *GenericPacket[T, K]) GetPacket() any {
+func (p *GenericParseMsg[T, K]) GetPacket() any {
 	return p.packet
 }

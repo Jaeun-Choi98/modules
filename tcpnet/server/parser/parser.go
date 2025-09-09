@@ -7,5 +7,5 @@ import (
 )
 
 type Parser interface {
-	Parse(conn net.Conn) (model.Packet, error)
+	Parse(conn net.Conn) (model.ParseMsg, error)
 }

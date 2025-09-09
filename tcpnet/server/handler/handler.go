@@ -13,17 +13,17 @@ var (
 )
 
 type TypeHandlerInterface interface {
-	handle(packet model.Packet, replyCh map[model.ReplyCode]chan model.Reply) error
+	handle(parseMsg model.ParseMsg, replyCh map[model.ReplyCode]chan model.Reply) error
 }
 
-type TypeHandlerFunc func(packet model.Packet, replyCh map[model.ReplyCode]chan model.Reply) error
+type TypeHandlerFunc func(parseMsg model.ParseMsg, replyCh map[model.ReplyCode]chan model.Reply) error
 
-func (f TypeHandlerFunc) handle(packet model.Packet, replyCh map[model.ReplyCode]chan model.Reply) error {
-	return f(packet, replyCh)
+func (f TypeHandlerFunc) handle(parseMsg model.ParseMsg, replyCh map[model.ReplyCode]chan model.Reply) error {
+	return f(parseMsg, replyCh)
 }
 
 type HandlerManagerInterface interface {
-	HandleMessage(packet model.Packet, replyCh map[model.ReplyCode]chan model.Reply) error
+	HandleMessage(parseMsg model.ParseMsg, replyCh map[model.ReplyCode]chan model.Reply) error
 	RegisterHandle(packetId any, handle TypeHandlerFunc)
 	RegisterHandler(packetId any, handler TypeHandlerInterface)
 }
@@ -33,10 +33,10 @@ type HandlerManager struct {
 	mu       sync.RWMutex
 }
 
-func (h *HandlerManager) HandleMessage(packet model.Packet, replyCh map[model.ReplyCode]chan model.Reply) error {
+func (h *HandlerManager) HandleMessage(parseMsg model.ParseMsg, replyCh map[model.ReplyCode]chan model.Reply) error {
 
 	h.mu.RLock()
-	handler, exists := h.handlers[packet.GetPacketId()]
+	handler, exists := h.handlers[parseMsg.GetPacketId()]
 	h.mu.RUnlock()
 
 	if !exists {
@@ -49,7 +49,7 @@ func (h *HandlerManager) HandleMessage(packet model.Packet, replyCh map[model.Re
 				log.Println("panic in handling packet")
 			}
 		}()
-		if err := handler.handle(packet, replyCh); err != nil {
+		if err := handler.handle(parseMsg, replyCh); err != nil {
 			log.Printf("error in handling packet: %+v", err)
 		}
 	}()
