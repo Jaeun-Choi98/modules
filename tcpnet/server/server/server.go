@@ -132,7 +132,7 @@ func (s *ServerBase) WaitForAccept() error {
 			}
 			continue
 		}
-		s.wg.Add(1)
+
 		go s.handleConnectFunc(conn)
 	}
 }
