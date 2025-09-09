@@ -1,4 +1,4 @@
-package model
+package tcpmd
 
 type Reply interface {
 	GetPayload() any
