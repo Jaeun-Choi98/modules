@@ -29,21 +29,25 @@ type HandlerManagerInterface interface {
 	RegisterHandler(packetId any, handler TypeHandlerInterface)
 }
 
-type HandlerManager struct {
-	handlers map[any]TypeHandlerInterface
+type MsgType interface {
+	byte | int8 | int16 | uint16 | int | int32 | uint32 | int64 | uint64 | float32 | float64 | string
+}
+
+type HandlerManager[T MsgType] struct {
+	handlers map[T]TypeHandlerInterface
 	mu       sync.RWMutex
 }
 
-func New() *HandlerManager {
-	return &HandlerManager{
-		handlers: make(map[any]TypeHandlerInterface),
+func New[T MsgType]() *HandlerManager[T] {
+	return &HandlerManager[T]{
+		handlers: make(map[T]TypeHandlerInterface),
 	}
 }
 
-func (h *HandlerManager) HandleMessage(parseMsg tcpmd.ParseMsg, replyCh map[tcpmd.ReplyCode]chan tcpmd.Reply) error {
+func (h *HandlerManager[T]) HandleMessage(parseMsg tcpmd.ParseMsg, replyCh map[tcpmd.ReplyCode]chan tcpmd.Reply) error {
 
 	h.mu.RLock()
-	handler, exists := h.handlers[parseMsg.GetPacketId()]
+	handler, exists := h.handlers[parseMsg.GetPacketId().(T)]
 	h.mu.RUnlock()
 
 	if !exists {
@@ -67,10 +71,10 @@ func (h *HandlerManager) HandleMessage(parseMsg tcpmd.ParseMsg, replyCh map[tcpm
 	return nil
 }
 
-func (h *HandlerManager) RegisterHandle(packetId any, handle TypeHandlerFunc) {
-	h.handlers[packetId] = handle
+func (h *HandlerManager[T]) RegisterHandle(packetId any, handle TypeHandlerFunc) {
+	h.handlers[packetId.(T)] = handle
 }
 
-func (h *HandlerManager) RegisterHandler(packetId any, handler TypeHandlerInterface) {
-	h.handlers[packetId] = handler
+func (h *HandlerManager[T]) RegisterHandler(packetId any, handler TypeHandlerInterface) {
+	h.handlers[packetId.(T)] = handler
 }
