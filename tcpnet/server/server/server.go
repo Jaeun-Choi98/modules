@@ -69,7 +69,7 @@ func (s *ServerBase) Listening() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.ip == "" || s.port == "" {
+	if s.port == "" {
 		return fmt.Errorf("need ip and port, call SetIpAndPort.")
 	}
 
