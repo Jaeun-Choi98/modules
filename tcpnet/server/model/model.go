@@ -37,6 +37,7 @@ func (r *GenericReply[T]) GetErr() error {
 }
 
 type ParseMsg interface {
+	SetClientId(clientId uint32)
 	GetClientId() uint32
 	GetPacketId() any
 	GetPacket() any
@@ -52,6 +53,10 @@ func (p *GenericParseMsg[T, K]) AddPacket(packetId T, packet K) *GenericParseMsg
 	p.packet = packet
 	p.packetId = packetId
 	return p
+}
+
+func (p *GenericParseMsg[T, K]) SetClientId(clientId uint32) {
+	p.ClientId = clientId
 }
 
 func (p *GenericParseMsg[T, K]) GetClientId() uint32 {
