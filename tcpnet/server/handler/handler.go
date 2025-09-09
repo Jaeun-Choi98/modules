@@ -55,3 +55,11 @@ func (h *HandlerManager) HandleMessage(parseMsg model.ParseMsg, replyCh map[mode
 	}()
 	return nil
 }
+
+func (h *HandlerManager) RegisterHandle(packetId any, handle TypeHandlerFunc) {
+	h.handlers[packetId] = handle
+}
+
+func (h *HandlerManager) RegisterHandler(packetId any, handler TypeHandlerInterface) {
+	h.handlers[packetId] = handler
+}
