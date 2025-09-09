@@ -33,6 +33,12 @@ type HandlerManager struct {
 	mu       sync.RWMutex
 }
 
+func New() *HandlerManager {
+	return &HandlerManager{
+		handlers: make(map[any]TypeHandlerInterface),
+	}
+}
+
 func (h *HandlerManager) HandleMessage(parseMsg tcpmd.ParseMsg, replyCh map[tcpmd.ReplyCode]chan tcpmd.Reply) error {
 
 	h.mu.RLock()
