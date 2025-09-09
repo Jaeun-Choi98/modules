@@ -5,7 +5,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/Jaeun-Choi98/modules/tcpnet/server/model"
+	tcpmd "github.com/Jaeun-Choi98/modules/tcpnet/server/model"
 )
 
 var (
@@ -13,17 +13,17 @@ var (
 )
 
 type TypeHandlerInterface interface {
-	handle(parseMsg model.ParseMsg, replyCh map[model.ReplyCode]chan model.Reply) error
+	handle(parseMsg tcpmd.ParseMsg, replyCh map[tcpmd.ReplyCode]chan tcpmd.Reply) error
 }
 
-type TypeHandlerFunc func(parseMsg model.ParseMsg, replyCh map[model.ReplyCode]chan model.Reply) error
+type TypeHandlerFunc func(parseMsg tcpmd.ParseMsg, replyCh map[tcpmd.ReplyCode]chan tcpmd.Reply) error
 
-func (f TypeHandlerFunc) handle(parseMsg model.ParseMsg, replyCh map[model.ReplyCode]chan model.Reply) error {
+func (f TypeHandlerFunc) handle(parseMsg tcpmd.ParseMsg, replyCh map[tcpmd.ReplyCode]chan tcpmd.Reply) error {
 	return f(parseMsg, replyCh)
 }
 
 type HandlerManagerInterface interface {
-	HandleMessage(parseMsg model.ParseMsg, replyCh map[model.ReplyCode]chan model.Reply) error
+	HandleMessage(parseMsg tcpmd.ParseMsg, replyCh map[tcpmd.ReplyCode]chan tcpmd.Reply) error
 	RegisterHandle(packetId any, handle TypeHandlerFunc)
 	RegisterHandler(packetId any, handler TypeHandlerInterface)
 }
@@ -33,7 +33,7 @@ type HandlerManager struct {
 	mu       sync.RWMutex
 }
 
-func (h *HandlerManager) HandleMessage(parseMsg model.ParseMsg, replyCh map[model.ReplyCode]chan model.Reply) error {
+func (h *HandlerManager) HandleMessage(parseMsg tcpmd.ParseMsg, replyCh map[tcpmd.ReplyCode]chan tcpmd.Reply) error {
 
 	h.mu.RLock()
 	handler, exists := h.handlers[parseMsg.GetPacketId()]
