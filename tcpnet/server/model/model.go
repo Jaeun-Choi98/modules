@@ -5,23 +5,23 @@ type Reply interface {
 	GetErr() error
 }
 
-type ReplyCode interface {
-	GetReplyCode() any
-}
+// type ReplyCode interface {
+// 	GetReplyCode() any
+// }
 
-type GenericReplyCode[T any] struct {
-	Code T
-}
+// type GenericReplyCode[T any] struct {
+// 	Code T
+// }
 
-func NewReplyCode[T any](code T) *GenericReplyCode[T] {
-	return &GenericReplyCode[T]{
-		Code: code,
-	}
-}
+// func NewReplyCode[T any](code T) *GenericReplyCode[T] {
+// 	return &GenericReplyCode[T]{
+// 		Code: code,
+// 	}
+// }
 
-func (r *GenericReplyCode[T]) GetReplyCode() any {
-	return r.Code
-}
+// func (r *GenericReplyCode[T]) GetReplyCode() any {
+// 	return r.Code
+// }
 
 type GenericReply[T any] struct {
 	Payload T

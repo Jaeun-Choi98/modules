@@ -14,17 +14,17 @@ var (
 )
 
 type TypeHandlerInterface interface {
-	handle(parseMsg tcpmd.ParseMsg, replyCh map[tcpmd.ReplyCode]chan tcpmd.Reply) error
+	handle(parseMsg tcpmd.ParseMsg, replyCh map[any]chan tcpmd.Reply) error
 }
 
-type TypeHandlerFunc func(parseMsg tcpmd.ParseMsg, replyCh map[tcpmd.ReplyCode]chan tcpmd.Reply) error
+type TypeHandlerFunc func(parseMsg tcpmd.ParseMsg, replyCh map[any]chan tcpmd.Reply) error
 
-func (f TypeHandlerFunc) handle(parseMsg tcpmd.ParseMsg, replyCh map[tcpmd.ReplyCode]chan tcpmd.Reply) error {
+func (f TypeHandlerFunc) handle(parseMsg tcpmd.ParseMsg, replyCh map[any]chan tcpmd.Reply) error {
 	return f(parseMsg, replyCh)
 }
 
 type HandlerManagerInterface interface {
-	HandleMessage(parseMsg tcpmd.ParseMsg, replyCh map[tcpmd.ReplyCode]chan tcpmd.Reply) error
+	HandleMessage(parseMsg tcpmd.ParseMsg, replyCh map[any]chan tcpmd.Reply) error
 	RegisterHandle(packetId any, handle TypeHandlerFunc)
 	RegisterHandler(packetId any, handler TypeHandlerInterface)
 }
@@ -44,7 +44,7 @@ func New[T MsgType]() *HandlerManager[T] {
 	}
 }
 
-func (h *HandlerManager[T]) HandleMessage(parseMsg tcpmd.ParseMsg, replyCh map[tcpmd.ReplyCode]chan tcpmd.Reply) error {
+func (h *HandlerManager[T]) HandleMessage(parseMsg tcpmd.ParseMsg, replyCh map[any]chan tcpmd.Reply) error {
 
 	h.mu.RLock()
 	handler, exists := h.handlers[parseMsg.GetPacketId().(T)]
