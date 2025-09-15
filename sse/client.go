@@ -42,7 +42,7 @@ func (c *SSEClient[T, K]) SendMessage(evt Event) error {
 	// 컨텍스트가 취소되었는지 확인
 	select {
 	case <-c.Ctx.Done():
-		err := fmt.Errorf("client connection closed")
+		err := fmt.Errorf("[SSE] client connection closed")
 		return err
 	default:
 		// SSE 형식으로 이벤트 전송

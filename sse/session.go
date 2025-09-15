@@ -39,7 +39,7 @@ func (s *Session[T, K]) RemoveClient(clientId K) {
 	defer s.mu.Unlock()
 	if client, exists := s.clients[clientId]; exists {
 		client.Close()
-		log.Printf("Closed client[userId: %v, clientId: %v]", s.userId, clientId)
+		log.Printf("[SSE] closed client[userId: %v, clientId: %v]", s.userId, clientId)
 		delete(s.clients, clientId)
 	}
 }

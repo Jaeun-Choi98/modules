@@ -68,7 +68,7 @@ func (s *SessionManager[T, K]) RemoveSession(userId T) {
 			session.Close()
 		}
 
-		log.Printf("Closed session[userId:%v, sessionId:%s]", userId, sessionId)
+		log.Printf("[SSE] closed session[userId:%v, sessionId:%s]", userId, sessionId)
 		// 인덱스에서 제거
 		delete(s.sessionIndex, userId)
 
