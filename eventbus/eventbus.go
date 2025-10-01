@@ -13,16 +13,20 @@ import (
  * -> deprecated this package. use github.com/Jaeun-Choi98/eventbus (same source code).
  */
 
-type Topic interface {
-	GetEventType() any
+type TopicType interface {
+	byte | int8 | int16 | uint16 | int | int32 | uint32 | int64 | uint64 | float32 | float64 | string
+}
+
+type Topic[T TopicType] interface {
+	GetEventType() T
 }
 
 type Event interface {
 	GetEventId() uint32
 }
 
-type EventBus struct {
-	subscribers map[any][]chan Event
+type EventBus[T TopicType] struct {
+	subscribers map[T][]chan Event
 
 	processedMsgs   map[uint32]time.Time
 	cleanupDuration time.Duration
@@ -34,10 +38,10 @@ type EventBus struct {
 	wg     sync.WaitGroup
 }
 
-func NewEventBus(pctx context.Context, duration time.Duration) *EventBus {
+func NewEventBus[T TopicType](pctx context.Context, duration time.Duration) *EventBus[T] {
 	ctx, cancel := context.WithCancel(pctx)
-	eb := &EventBus{
-		subscribers:     make(map[any][]chan Event),
+	eb := &EventBus[T]{
+		subscribers:     make(map[T][]chan Event),
 		processedMsgs:   make(map[uint32]time.Time),
 		cleanupDuration: duration,
 		ctx:             ctx,
@@ -50,7 +54,7 @@ func NewEventBus(pctx context.Context, duration time.Duration) *EventBus {
 	return eb
 }
 
-func (b *EventBus) cleanupOldMessages() {
+func (b *EventBus[T]) cleanupOldMessages() {
 
 	cleanupTicker := time.NewTicker(b.cleanupDuration)
 
@@ -77,7 +81,7 @@ func (b *EventBus) cleanupOldMessages() {
 	}
 }
 
-func (b *EventBus) Subscribe(topic Topic, cap int) chan Event {
+func (b *EventBus[T]) Subscribe(topic Topic[T], cap int) chan Event {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	ch := make(chan Event, cap)
@@ -85,7 +89,7 @@ func (b *EventBus) Subscribe(topic Topic, cap int) chan Event {
 	return ch
 }
 
-func (b *EventBus) Unsubscribe(topic Topic, ch chan Event) {
+func (b *EventBus[T]) Unsubscribe(topic Topic[T], ch chan Event) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -100,7 +104,7 @@ func (b *EventBus) Unsubscribe(topic Topic, ch chan Event) {
 	}
 }
 
-func (b *EventBus) Publish(topic Topic, event Event) {
+func (b *EventBus[T]) Publish(topic Topic[T], event Event) {
 	b.mu.RLock()
 	if _, exists := b.processedMsgs[event.GetEventId()]; exists {
 		return
@@ -124,7 +128,7 @@ func (b *EventBus) Publish(topic Topic, event Event) {
 	b.mu.RUnlock()
 }
 
-func (b *EventBus) Close() {
+func (b *EventBus[T]) Close() {
 	b.cancel()
 	b.wg.Wait()
 
