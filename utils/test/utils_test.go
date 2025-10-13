@@ -2,6 +2,7 @@ package test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/Jaeun-Choi98/modules/utils"
 )
@@ -50,4 +51,9 @@ func TestUtils(t *testing.T) {
 	for k, v := range p2.Mp {
 		t.Logf("key: %+v, val: %+v", k, v)
 	}
+}
+
+func TestTz(t *testing.T) {
+	utc := time.Now().UTC()
+	t.Log(utc, utils.ConvertOnlyTimezone(utc, utils.LocalKorea))
 }

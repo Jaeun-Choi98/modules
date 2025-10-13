@@ -21,6 +21,11 @@ func NewKoreaLocation() *time.Location {
 	return local
 }
 
+func ConvertOnlyTimezone(old time.Time, tz *time.Location) time.Time {
+	new := time.Date(old.Year(), old.Month(), old.Day(), old.Hour(), old.Minute(), old.Second(), old.Nanosecond(), tz)
+	return new
+}
+
 func ValToIdx[T constraints.Integer](v T) []int {
 	ret := make([]int, 0)
 	i := 0
