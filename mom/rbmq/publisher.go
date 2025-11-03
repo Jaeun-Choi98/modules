@@ -24,18 +24,20 @@ func NewPublisher(exchange, exchangeType string, c *Client) (*Publisher, error) 
 		return nil, err
 	}
 
-	err = ch.ExchangeDeclare(
-		exchange,
-		exchangeType,
-		true,
-		false,
-		false,
-		false,
-		nil,
-	)
+	if exchange != "" {
+		err = ch.ExchangeDeclare(
+			exchange,
+			exchangeType,
+			true,
+			false,
+			false,
+			false,
+			nil,
+		)
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to declare exchange: %v", err)
+		if err != nil {
+			return nil, fmt.Errorf("failed to declare exchange: %v", err)
+		}
 	}
 
 	return &Publisher{
