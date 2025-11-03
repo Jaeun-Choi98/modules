@@ -16,14 +16,16 @@ type Consumer struct {
 }
 
 type ConsumerConfig struct {
-	QueueName    string
-	Exchange     string
-	ExchangeType string
-	RoutingKeys  []string
-	PrefetchCnt  int
-	Durable      bool
-	AutoDelete   bool
-	Exclusive    bool
+	QueueName          string
+	Exchange           string
+	ExchangeType       string
+	RoutingKeys        []string
+	PrefetchCnt        int
+	ExchangeDurable    bool
+	ExchangeAutoDelete bool
+	QueueDurable       bool
+	QueueAutoDelete    bool
+	Exclusive          bool
 }
 
 type ConsumeParams struct {
@@ -69,8 +71,8 @@ func NewConsumer(client *Client, config ConsumerConfig) (*Consumer, error) {
 		err := ch.ExchangeDeclare(
 			config.Exchange,
 			config.ExchangeType,
-			config.Durable,
-			false,
+			config.ExchangeDurable,
+			config.ExchangeAutoDelete,
 			false,
 			false,
 			nil,
@@ -83,8 +85,8 @@ func NewConsumer(client *Client, config ConsumerConfig) (*Consumer, error) {
 	// 큐 선언
 	queue, err := ch.QueueDeclare(
 		config.QueueName,
-		config.Durable,
-		config.AutoDelete,
+		config.QueueDurable,
+		config.QueueAutoDelete,
 		config.Exclusive,
 		false,
 		nil,
