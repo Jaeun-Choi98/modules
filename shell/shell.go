@@ -38,11 +38,11 @@ func (se *ScriptExecutor) Execute(ctx context.Context, shellName, scriptName, co
 		result.Error = err
 		return result, err
 	}
+
 	defer func() {
 		if autoDelete {
 			os.Remove(scriptPath)
 		}
-
 	}()
 
 	// 명령 생성
