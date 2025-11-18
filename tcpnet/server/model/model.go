@@ -94,10 +94,31 @@ func (m *ReplyChannelManager) Set(key any, ch chan Reply) {
 	m.channels[key] = ch
 }
 
+// 채널을 닫지 않고 맵에서 정리
 func (m *ReplyChannelManager) Del(key any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.channels, key)
+}
+
+// 채널을 닫고 맵에서 정리
+func (m *ReplyChannelManager) Close(key any) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if ch, exists := m.channels[key]; exists {
+		close(ch)
+		delete(m.channels, key)
+	}
+}
+
+func (m *ReplyChannelManager) CloseAll() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for key, ch := range m.channels {
+		close(ch)
+		delete(m.channels, key)
+	}
 }
 
 type ReqContext struct {
