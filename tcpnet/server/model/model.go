@@ -106,10 +106,12 @@ type ReqContext struct {
 	replyManager *ReplyChannelManager
 }
 
-func NewReqContext(ctx context.Context, rm *ReplyChannelManager) *ReqContext {
+func NewReqContext(ctx context.Context) *ReqContext {
 	return &ReqContext{
-		context:      ctx,
-		replyManager: rm,
+		context: ctx,
+		replyManager: &ReplyChannelManager{
+			channels: make(map[any]chan Reply),
+		},
 	}
 }
 
