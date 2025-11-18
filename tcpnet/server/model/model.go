@@ -1,5 +1,10 @@
 package tcpmd
 
+import (
+	"context"
+	"sync"
+)
+
 type Reply interface {
 	GetPayload() any
 	GetErr() error
@@ -69,4 +74,61 @@ func (p *GenericParseMsg[T, K]) GetPacketId() any {
 
 func (p *GenericParseMsg[T, K]) GetPacket() any {
 	return p.packet
+}
+
+type ReplyChannelManager struct {
+	mu       sync.RWMutex
+	channels map[any]chan Reply
+}
+
+func (m *ReplyChannelManager) Get(key any) (chan Reply, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	reply, exists := m.channels[key]
+	return reply, exists
+}
+
+func (m *ReplyChannelManager) Set(key any, ch chan Reply) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.channels[key] = ch
+}
+
+func (m *ReplyChannelManager) Del(key any) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.channels, key)
+}
+
+type ReqContext struct {
+	context      context.Context
+	parseMsg     ParseMsg
+	replyManager *ReplyChannelManager
+}
+
+func NewReqContext(ctx context.Context, rm *ReplyChannelManager) *ReqContext {
+	return &ReqContext{
+		context:      ctx,
+		replyManager: rm,
+	}
+}
+
+func (c *ReqContext) GetContext() context.Context {
+	return c.context
+}
+
+// func (c *Context) SetContext(ctx context.Context) {
+// 	c.context = ctx
+// }
+
+func (c *ReqContext) GetParsedMsg() ParseMsg {
+	return c.parseMsg
+}
+
+func (c *ReqContext) SetParsedMsg(msg ParseMsg) {
+	c.parseMsg = msg
+}
+
+func (c *ReqContext) GetReplyChannel(key any) *ReplyChannelManager {
+	return c.replyManager
 }
