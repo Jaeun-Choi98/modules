@@ -129,6 +129,6 @@ func (c *ReqContext) SetParsedMsg(msg ParseMsg) {
 	c.parseMsg = msg
 }
 
-func (c *ReqContext) GetReplyChannel(key any) *ReplyChannelManager {
+func (c *ReqContext) GetReplyChannel() *ReplyChannelManager {
 	return c.replyManager
 }
