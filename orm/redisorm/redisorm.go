@@ -18,8 +18,8 @@ type Model interface {
 }
 
 type RedisClient struct {
-	rdb     *redis.Client
-	mu      sync.RWMutex
+	rdb *redis.Client
+	// mu      sync.RWMutex
 	ctx     context.Context
 	timeout time.Duration
 }
@@ -47,6 +47,7 @@ type Repository[T Model] struct {
 	client      *RedisClient
 	tableName   string
 	indexFields map[string]any
+	mu          sync.RWMutex
 }
 
 func NewRepository[T Model](c *RedisClient, m T) *Repository[T] {
@@ -59,8 +60,8 @@ func NewRepository[T Model](c *RedisClient, m T) *Repository[T] {
 
 func (r *Repository[T]) Create(model T) error {
 
-	r.client.mu.Lock()
-	defer r.client.mu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	timeoutCtx, cancel := context.WithTimeout(r.client.ctx, r.client.timeout)
 	defer cancel()
@@ -111,8 +112,8 @@ func (r *Repository[T]) Create(model T) error {
 }
 
 func (r *Repository[T]) FindById(id int64) (T, error) {
-	r.client.mu.RLock()
-	defer r.client.mu.RUnlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	timeoutCtx, cancel := context.WithTimeout(r.client.ctx, r.client.timeout)
 	defer cancel()
@@ -148,7 +149,7 @@ func (r *Repository[T]) FindById(id int64) (T, error) {
 }
 
 func (r *Repository[T]) FindByIndex(fieldName string, value interface{}) (T, error) {
-	r.client.mu.RLock()
+	r.mu.RLock()
 
 	timeoutCtx, cancel := context.WithTimeout(r.client.ctx, r.client.timeout)
 	defer cancel()
@@ -164,13 +165,13 @@ func (r *Repository[T]) FindByIndex(fieldName string, value interface{}) (T, err
 	var id int64
 	fmt.Sscanf(idStr, "%d", &id)
 
-	r.client.mu.RUnlock()
+	r.mu.RUnlock()
 
 	return r.FindById(id)
 }
 
 func (r *Repository[T]) FindAll() ([]T, error) {
-	r.client.mu.RLock()
+	r.mu.RLock()
 
 	timeoutCtx, cancel := context.WithTimeout(r.client.ctx, r.client.timeout)
 	defer cancel()
@@ -181,7 +182,7 @@ func (r *Repository[T]) FindAll() ([]T, error) {
 		return nil, err
 	}
 
-	r.client.mu.RUnlock()
+	r.mu.RUnlock()
 
 	models := make([]T, 0, len(idStrs))
 	for _, idStr := range idStrs {
@@ -213,8 +214,8 @@ func (r *Repository[T]) Update(model T) error {
 		return fmt.Errorf("record not found: %w", err)
 	}
 
-	r.client.mu.Lock()
-	defer r.client.mu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	jsonData, err := json.Marshal(model)
 	if err != nil {
@@ -255,8 +256,8 @@ func (r *Repository[T]) Delete(id int64) error {
 		return err
 	}
 
-	r.client.mu.Lock()
-	defer r.client.mu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	timeoutCtx, cancel := context.WithTimeout(r.client.ctx, r.client.timeout)
 	defer cancel()
