@@ -2,6 +2,7 @@ package test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/Jaeun-Choi98/modules/orm/redisorm"
 	"github.com/stretchr/testify/assert"
@@ -30,6 +31,10 @@ func (d *Device) GetIndexFields() map[string]interface{} {
 		"status":        d.Status,
 	}
 }
+func (d *Device) GetTTL() time.Duration {
+	return 0
+}
+
 func TestRedisORMCreateAndFind(t *testing.T) {
 	redisClient := redisorm.NewRedisClient(addr, psssword, 0, 2, 5)
 	dvcRepository := redisorm.NewRepository(redisClient, &Device{})

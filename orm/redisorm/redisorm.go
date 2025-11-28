@@ -15,11 +15,11 @@ type Model interface {
 	SetId(id int64)
 	TableName() string
 	GetIndexFields() map[string]any
+	GetTTL() time.Duration
 }
 
 type RedisClient struct {
-	rdb *redis.Client
-	// mu      sync.RWMutex
+	rdb     *redis.Client
 	ctx     context.Context
 	timeout time.Duration
 }
@@ -48,6 +48,7 @@ type Repository[T Model] struct {
 	tableName   string
 	indexFields map[string]any
 	mu          sync.RWMutex
+	defaultTTL  time.Duration
 }
 
 func NewRepository[T Model](c *RedisClient, m T) *Repository[T] {
@@ -55,11 +56,76 @@ func NewRepository[T Model](c *RedisClient, m T) *Repository[T] {
 		client:      c,
 		tableName:   m.TableName(),
 		indexFields: m.GetIndexFields(),
+		defaultTTL:  0, // 0 = 만료 없음
 	}
 }
 
-func (r *Repository[T]) Create(model T) error {
+func (r *Repository[T]) SetDefaultTTL(ttl time.Duration) {
+	r.defaultTTL = ttl
+}
 
+func (r *Repository[T]) Create(model T) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	timeoutCtx, cancel := context.WithTimeout(r.client.ctx, r.client.timeout)
+	defer cancel()
+
+	if err := r.validate(model); err != nil {
+		return err
+	}
+
+	indexes := model.GetIndexFields()
+	for field, value := range indexes {
+		if exists, _ := r.checkDuplicate(field, value); exists {
+			return fmt.Errorf("duplicate %s: %v", field, value)
+		}
+	}
+
+	idKey := fmt.Sprintf("next_%s_id", r.tableName)
+	id, err := r.client.rdb.Incr(timeoutCtx, idKey).Result()
+	if err != nil {
+		return err
+	}
+
+	model.SetId(id)
+
+	jsonData, err := json.Marshal(model)
+	if err != nil {
+		return err
+	}
+
+	ttl := model.GetTTL()
+	if ttl == 0 {
+		ttl = r.defaultTTL
+	}
+
+	_, err = r.client.rdb.TxPipelined(timeoutCtx, func(pipe redis.Pipeliner) error {
+		primaryKey := fmt.Sprintf("%s:%d", r.tableName, id)
+		pipe.Do(timeoutCtx, "JSON.SET", primaryKey, "$", string(jsonData))
+
+		if ttl > 0 {
+			pipe.Expire(timeoutCtx, primaryKey, ttl)
+		}
+
+		for field, value := range indexes {
+			indexKey := fmt.Sprintf("%s:idx:%s", r.tableName, field)
+			pipe.HSet(timeoutCtx, indexKey, fmt.Sprint(value), id)
+		}
+
+		allIdsKey := fmt.Sprintf("%s:all_ids", r.tableName)
+		pipe.SAdd(timeoutCtx, allIdsKey, id)
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to create: %w", err)
+	}
+	return err
+}
+
+func (r *Repository[T]) CreateWithTTL(model T, ttl time.Duration) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -93,6 +159,10 @@ func (r *Repository[T]) Create(model T) error {
 	_, err = r.client.rdb.TxPipelined(timeoutCtx, func(pipe redis.Pipeliner) error {
 		primaryKey := fmt.Sprintf("%s:%d", r.tableName, id)
 		pipe.Do(timeoutCtx, "JSON.SET", primaryKey, "$", string(jsonData))
+
+		if ttl > 0 {
+			pipe.Expire(timeoutCtx, primaryKey, ttl)
+		}
 
 		for field, value := range indexes {
 			indexKey := fmt.Sprintf("%s:idx:%s", r.tableName, field)
@@ -199,8 +269,8 @@ func (r *Repository[T]) FindAll() ([]T, error) {
 	return models, nil
 }
 
+// Update시에 TTL이 model.TTL 혹은 defaultRepo.TTL에 의해 갱신됨.
 func (r *Repository[T]) Update(model T) error {
-
 	timeoutCtx, cancel := context.WithTimeout(r.client.ctx, r.client.timeout)
 	defer cancel()
 
@@ -222,9 +292,18 @@ func (r *Repository[T]) Update(model T) error {
 		return fmt.Errorf("failed to marshal model: %w", err)
 	}
 
+	ttl := model.GetTTL()
+	if ttl == 0 {
+		ttl = r.defaultTTL
+	}
+
 	_, err = r.client.rdb.TxPipelined(timeoutCtx, func(pipe redis.Pipeliner) error {
 		primaryKey := fmt.Sprintf("%s:%d", r.tableName, id)
 		pipe.Do(timeoutCtx, "JSON.SET", primaryKey, "$", string(jsonData))
+
+		if ttl > 0 {
+			pipe.Expire(timeoutCtx, primaryKey, ttl)
+		}
 
 		oldIndexes := oldModel.GetIndexFields()
 		for field, value := range oldIndexes {
@@ -250,7 +329,6 @@ func (r *Repository[T]) Update(model T) error {
 }
 
 func (r *Repository[T]) Delete(id int64) error {
-
 	model, err := r.FindById(id)
 	if err != nil {
 		return err
@@ -263,20 +341,19 @@ func (r *Repository[T]) Delete(id int64) error {
 	defer cancel()
 
 	_, err = r.client.rdb.TxPipelined(timeoutCtx, func(pipe redis.Pipeliner) error {
-
 		primaryKey := fmt.Sprintf("%s:%d", r.tableName, id)
-		pipe.Del(r.client.ctx, primaryKey)
+		pipe.Del(timeoutCtx, primaryKey)
 
 		indexes := model.GetIndexFields()
 		for field, value := range indexes {
 			indexKey := fmt.Sprintf("%s:idx:%s", r.tableName, field)
-			pipe.HDel(r.client.ctx, indexKey, fmt.Sprint(value))
+			pipe.HDel(timeoutCtx, indexKey, fmt.Sprint(value))
 		}
 
 		allIDsKey := fmt.Sprintf("%s:all_ids", r.tableName)
-		pipe.SRem(r.client.ctx, allIDsKey, id)
+		pipe.SRem(timeoutCtx, allIDsKey, id)
 
-		_, err = pipe.Exec(r.client.ctx)
+		_, err = pipe.Exec(timeoutCtx)
 		return err
 	})
 
@@ -285,6 +362,39 @@ func (r *Repository[T]) Delete(id int64) error {
 	}
 
 	return nil
+}
+
+func (r *Repository[T]) GetTTL(id int64) (time.Duration, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	timeoutCtx, cancel := context.WithTimeout(r.client.ctx, r.client.timeout)
+	defer cancel()
+
+	primaryKey := fmt.Sprintf("%s:%d", r.tableName, id)
+	return r.client.rdb.TTL(timeoutCtx, primaryKey).Result()
+}
+
+func (r *Repository[T]) RenewTTL(id int64, ttl time.Duration) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	timeoutCtx, cancel := context.WithTimeout(r.client.ctx, r.client.timeout)
+	defer cancel()
+
+	primaryKey := fmt.Sprintf("%s:%d", r.tableName, id)
+	return r.client.rdb.Expire(timeoutCtx, primaryKey, ttl).Err()
+}
+
+func (r *Repository[T]) RemoveTTL(id int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	timeoutCtx, cancel := context.WithTimeout(r.client.ctx, r.client.timeout)
+	defer cancel()
+
+	primaryKey := fmt.Sprintf("%s:%d", r.tableName, id)
+	return r.client.rdb.Persist(timeoutCtx, primaryKey).Err()
 }
 
 func (r *Repository[T]) validate(model T) error {
