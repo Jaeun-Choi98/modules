@@ -229,6 +229,7 @@ func (r *Repository[T]) FindByIndex(fieldName string, value interface{}) (T, err
 	indexKey := fmt.Sprintf("%s:idx:%s", r.tableName, fieldName)
 	idStr, err := r.client.rdb.HGet(timeoutCtx, indexKey, fmt.Sprint(value)).Result()
 	if err != nil {
+		r.mu.RUnlock()
 		return model, fmt.Errorf("record not found: %w", err)
 	}
 
@@ -249,6 +250,7 @@ func (r *Repository[T]) FindAll() ([]T, error) {
 	allIdsKey := fmt.Sprintf("%s:all_ids", r.tableName)
 	idStrs, err := r.client.rdb.SMembers(timeoutCtx, allIdsKey).Result()
 	if err != nil {
+		r.mu.RUnlock()
 		return nil, err
 	}
 
