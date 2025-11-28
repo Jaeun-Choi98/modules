@@ -77,7 +77,7 @@ func (r *Repository[T]) Create(model T) error {
 
 	indexes := model.GetIndexFields()
 	for field, value := range indexes {
-		if exists, _ := r.checkDuplicate(field, value); exists {
+		if exists, _ := r.checkDuplicate(timeoutCtx, field, value); exists {
 			return fmt.Errorf("duplicate %s: %v", field, value)
 		}
 	}
@@ -138,7 +138,7 @@ func (r *Repository[T]) CreateWithTTL(model T, ttl time.Duration) error {
 
 	indexes := model.GetIndexFields()
 	for field, value := range indexes {
-		if exists, _ := r.checkDuplicate(field, value); exists {
+		if exists, _ := r.checkDuplicate(timeoutCtx, field, value); exists {
 			return fmt.Errorf("duplicate %s: %v", field, value)
 		}
 	}
@@ -407,7 +407,7 @@ func (r *Repository[T]) validate(model T) error {
 	return nil
 }
 
-func (r *Repository[T]) checkDuplicate(field string, value interface{}) (bool, error) {
+func (r *Repository[T]) checkDuplicate(ctx context.Context, field string, value interface{}) (bool, error) {
 	indexKey := fmt.Sprintf("%s:idx:%s", r.tableName, field)
-	return r.client.rdb.HExists(r.client.ctx, indexKey, fmt.Sprint(value)).Result()
+	return r.client.rdb.HExists(ctx, indexKey, fmt.Sprint(value)).Result()
 }
