@@ -229,6 +229,7 @@ func (r *Repository[T]) FindByIndex(fieldName string, value interface{}) (T, err
 	indexKey := fmt.Sprintf("%s:idx:%s", r.tableName, fieldName)
 	idStr, err := r.client.rdb.HGet(timeoutCtx, indexKey, fmt.Sprint(value)).Result()
 	if err != nil {
+		r.mu.RUnlock()
 		return model, fmt.Errorf("record not found: %w", err)
 	}
 
@@ -249,6 +250,7 @@ func (r *Repository[T]) FindAll() ([]T, error) {
 	allIdsKey := fmt.Sprintf("%s:all_ids", r.tableName)
 	idStrs, err := r.client.rdb.SMembers(timeoutCtx, allIdsKey).Result()
 	if err != nil {
+		r.mu.RUnlock()
 		return nil, err
 	}
 
@@ -410,4 +412,51 @@ func (r *Repository[T]) validate(model T) error {
 func (r *Repository[T]) checkDuplicate(ctx context.Context, field string, value interface{}) (bool, error) {
 	indexKey := fmt.Sprintf("%s:idx:%s", r.tableName, field)
 	return r.client.rdb.HExists(ctx, indexKey, fmt.Sprint(value)).Result()
+}
+
+func (r *Repository[T]) CleanupExpired() (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	timeoutCtx, cancel := context.WithTimeout(r.client.ctx, r.client.timeout)
+	defer cancel()
+
+	allIdsKey := fmt.Sprintf("%s:all_ids", r.tableName)
+	idStrs, err := r.client.rdb.SMembers(timeoutCtx, allIdsKey).Result()
+	if err != nil {
+		return 0, err
+	}
+
+	cleanedCount := 0
+
+	for _, idStr := range idStrs {
+		var id int64
+		fmt.Sscanf(idStr, "%d", &id)
+
+		primaryKey := fmt.Sprintf("%s:%d", r.tableName, id)
+		exists, _ := r.client.rdb.Exists(timeoutCtx, primaryKey).Result()
+		// 만료됨.
+		if exists == 0 {
+			// 1. all_ids에서 제거
+			r.client.rdb.SRem(timeoutCtx, allIdsKey, id)
+
+			// 2. 인덱스에서 제거 (모든 인덱스 필드를 알아야 함)
+			indexPattern := fmt.Sprintf("%s:idx:*", r.tableName)
+			indexKeys, _ := r.client.rdb.Keys(timeoutCtx, indexPattern).Result()
+
+			for _, indexKey := range indexKeys {
+				// Hash에서 해당 ID를 가진 필드 찾아서 삭제
+				fields, _ := r.client.rdb.HGetAll(timeoutCtx, indexKey).Result()
+				for field, value := range fields {
+					if value == fmt.Sprint(id) {
+						r.client.rdb.HDel(timeoutCtx, indexKey, field)
+					}
+				}
+			}
+
+			cleanedCount++
+		}
+	}
+
+	return cleanedCount, nil
 }
