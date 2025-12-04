@@ -105,8 +105,6 @@ func (m *ReplyChannelManager) Close(key any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if ch, exists := m.channels[key]; exists {
-		for range ch {
-		}
 		close(ch)
 		delete(m.channels, key)
 	}
@@ -117,8 +115,6 @@ func (m *ReplyChannelManager) CloseAll() {
 	defer m.mu.Unlock()
 
 	for key, ch := range m.channels {
-		for range ch {
-		}
 		close(ch)
 		delete(m.channels, key)
 	}
@@ -170,8 +166,6 @@ func (c *ReqContext) GetReplyChannel() *ReplyChannelManager {
 
 func (c *ReqContext) Close() error {
 	c.replyManager.CloseAll()
-	for range c.parseMsg {
-	}
 	close(c.parseMsg)
 	return nil
 }
