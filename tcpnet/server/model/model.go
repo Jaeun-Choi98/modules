@@ -101,11 +101,12 @@ func (m *ReplyChannelManager) Del(key any) {
 	delete(m.channels, key)
 }
 
-// 채널을 닫고 맵에서 정리
 func (m *ReplyChannelManager) Close(key any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if ch, exists := m.channels[key]; exists {
+		for range ch {
+		}
 		close(ch)
 		delete(m.channels, key)
 	}
@@ -116,6 +117,8 @@ func (m *ReplyChannelManager) CloseAll() {
 	defer m.mu.Unlock()
 
 	for key, ch := range m.channels {
+		for range ch {
+		}
 		close(ch)
 		delete(m.channels, key)
 	}
@@ -123,13 +126,14 @@ func (m *ReplyChannelManager) CloseAll() {
 
 type ReqContext struct {
 	context      context.Context
-	parseMsg     ParseMsg
+	parseMsg     chan ParseMsg
 	replyManager *ReplyChannelManager
 }
 
 func NewReqContext(ctx context.Context) *ReqContext {
 	return &ReqContext{
-		context: ctx,
+		context:  ctx,
+		parseMsg: make(chan ParseMsg),
 		replyManager: &ReplyChannelManager{
 			channels: make(map[any]chan Reply),
 		},
@@ -145,13 +149,29 @@ func (c *ReqContext) GetContext() context.Context {
 // }
 
 func (c *ReqContext) GetParsedMsg() ParseMsg {
-	return c.parseMsg
+	msg, ok := <-c.parseMsg
+	if !ok {
+		return nil
+	}
+	return msg
 }
 
 func (c *ReqContext) SetParsedMsg(msg ParseMsg) {
-	c.parseMsg = msg
+	c.parseMsg <- msg
 }
 
 func (c *ReqContext) GetReplyChannel() *ReplyChannelManager {
 	return c.replyManager
+}
+
+func (c *ReqContext) Close() error {
+	c.replyManager.CloseAll()
+	for range c.parseMsg {
+	}
+	close(c.parseMsg)
+	return nil
+}
+
+func (c *ReqContext) GetParseMsgChan() chan ParseMsg {
+	return c.parseMsg
 }
