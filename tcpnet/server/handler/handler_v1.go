@@ -18,7 +18,7 @@ func (f HandlerFunc) handle(c *tcpmd.HandleContext) error {
 }
 
 type ManagerInterface interface {
-	HandleMessage(c *tcpmd.HandleContext) error
+	HandleMessage(c *tcpmd.ClientContext) error
 	RegisterHandle(packetId any, handle HandlerFunc)
 	RegisterHandler(packetId any, handler HandlerInterface)
 }
