@@ -18,7 +18,7 @@ func (f HandlerFunc) handle(c *tcpmd.ReqContext) error {
 }
 
 type ManagerInterface interface {
-	HandleMessage(c *tcpmd.ReqContext) error
+	HandleMessage(c *tcpmd.ReqContext, packetId any) error
 	RegisterHandle(packetId any, handle HandlerFunc)
 	RegisterHandler(packetId any, handler HandlerInterface)
 }
@@ -34,10 +34,10 @@ func NewV1[T MsgType]() *Manager[T] {
 	}
 }
 
-func (h *Manager[T]) HandleMessage(c *tcpmd.ReqContext) error {
+func (h *Manager[T]) HandleMessage(c *tcpmd.ReqContext, packetId any) error {
 
 	h.mu.RLock()
-	handler, exists := h.handlers[c.GetParsedMsg().GetPacketId().(T)]
+	handler, exists := h.handlers[packetId.(T)]
 	h.mu.RUnlock()
 
 	if !exists {
@@ -45,7 +45,7 @@ func (h *Manager[T]) HandleMessage(c *tcpmd.ReqContext) error {
 	}
 
 	if handler == nil {
-		return ErrNilHandler
+		return errNilHandler
 	}
 
 	go func() {

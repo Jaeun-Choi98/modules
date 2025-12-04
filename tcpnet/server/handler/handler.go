@@ -10,7 +10,8 @@ import (
 
 var (
 	errNotExistsHandlerType = errors.New("not exsits registered handler about packet.GetPacketId")
-	ErrNilHandler           = errors.New("nil handler")
+	errNilHandler           = errors.New("nil handler")
+	errNotExistsMsg         = errors.New("not exists parsed massage")
 )
 
 type TypeHandlerInterface interface {
@@ -55,7 +56,7 @@ func (h *HandlerManager[T]) HandleMessage(parseMsg tcpmd.ParseMsg, replyCh map[a
 	}
 
 	if handler == nil {
-		return ErrNilHandler
+		return errNilHandler
 	}
 
 	go func() {

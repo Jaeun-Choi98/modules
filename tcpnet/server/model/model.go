@@ -148,12 +148,16 @@ func (c *ReqContext) GetContext() context.Context {
 // 	c.context = ctx
 // }
 
-func (c *ReqContext) GetParsedMsg() ParseMsg {
-	msg, ok := <-c.parseMsg
-	if !ok {
-		return nil
+func (c *ReqContext) GetParsedMsg() (ParseMsg, bool) {
+	select {
+	case msg, ok := <-c.parseMsg:
+		if !ok {
+			return nil, false
+		}
+		return msg, true
+	default:
+		return nil, false
 	}
-	return msg
 }
 
 func (c *ReqContext) SetParsedMsg(msg ParseMsg) {
