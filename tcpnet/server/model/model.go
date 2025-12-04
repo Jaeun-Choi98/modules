@@ -130,10 +130,10 @@ type ReqContext struct {
 	replyManager *ReplyChannelManager
 }
 
-func NewReqContext(ctx context.Context) *ReqContext {
+func NewReqContext(ctx context.Context, msgChannelSize int) *ReqContext {
 	return &ReqContext{
 		context:  ctx,
-		parseMsg: make(chan ParseMsg),
+		parseMsg: make(chan ParseMsg, msgChannelSize),
 		replyManager: &ReplyChannelManager{
 			channels: make(map[any]chan Reply),
 		},
