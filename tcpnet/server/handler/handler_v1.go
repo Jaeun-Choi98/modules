@@ -8,17 +8,17 @@ import (
 )
 
 type HandlerInterface interface {
-	handle(c *tcpmd.ReqContext, msg tcpmd.ParseMsg) error
+	handle(c *tcpmd.HandleContext) error
 }
 
-type HandlerFunc func(c *tcpmd.ReqContext, msg tcpmd.ParseMsg) error
+type HandlerFunc func(c *tcpmd.HandleContext) error
 
-func (f HandlerFunc) handle(c *tcpmd.ReqContext, msg tcpmd.ParseMsg) error {
-	return f(c, msg)
+func (f HandlerFunc) handle(c *tcpmd.HandleContext) error {
+	return f(c)
 }
 
 type ManagerInterface interface {
-	HandleMessage(c *tcpmd.ReqContext, packetId any) error
+	HandleMessage(c *tcpmd.HandleContext) error
 	RegisterHandle(packetId any, handle HandlerFunc)
 	RegisterHandler(packetId any, handler HandlerInterface)
 }
@@ -34,7 +34,7 @@ func NewV1[T MsgType]() *Manager[T] {
 	}
 }
 
-func (h *Manager[T]) HandleMessage(c *tcpmd.ReqContext) error {
+func (h *Manager[T]) HandleMessage(c *tcpmd.ClientContext) error {
 
 	msg, ok := c.GetParsedMsg()
 	if !ok {
@@ -59,7 +59,7 @@ func (h *Manager[T]) HandleMessage(c *tcpmd.ReqContext) error {
 				log.Println("panic in handling packet")
 			}
 		}()
-		if err := handler.handle(c, msg); err != nil {
+		if err := handler.handle(c.NewHandleContext(msg)); err != nil {
 			log.Printf("error in handling packet: %+v", err)
 		}
 	}()

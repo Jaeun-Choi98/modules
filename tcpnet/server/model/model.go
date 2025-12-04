@@ -120,14 +120,14 @@ func (m *ReplyChannelManager) CloseAll() {
 	}
 }
 
-type ReqContext struct {
+type ClientContext struct {
 	context      context.Context
 	parseMsg     chan ParseMsg
 	replyManager *ReplyChannelManager
 }
 
-func NewReqContext(ctx context.Context, msgChannelSize int) *ReqContext {
-	return &ReqContext{
+func NewClientContext(ctx context.Context, msgChannelSize int) *ClientContext {
+	return &ClientContext{
 		context:  ctx,
 		parseMsg: make(chan ParseMsg, msgChannelSize),
 		replyManager: &ReplyChannelManager{
@@ -136,7 +136,7 @@ func NewReqContext(ctx context.Context, msgChannelSize int) *ReqContext {
 	}
 }
 
-func (c *ReqContext) GetContext() context.Context {
+func (c *ClientContext) GetContext() context.Context {
 	return c.context
 }
 
@@ -144,7 +144,7 @@ func (c *ReqContext) GetContext() context.Context {
 // 	c.context = ctx
 // }
 
-func (c *ReqContext) GetParsedMsg() (ParseMsg, bool) {
+func (c *ClientContext) GetParsedMsg() (ParseMsg, bool) {
 	select {
 	case msg, ok := <-c.parseMsg:
 		if !ok {
@@ -156,20 +156,47 @@ func (c *ReqContext) GetParsedMsg() (ParseMsg, bool) {
 	}
 }
 
-func (c *ReqContext) SetParsedMsg(msg ParseMsg) {
+func (c *ClientContext) SetParsedMsg(msg ParseMsg) {
 	c.parseMsg <- msg
 }
 
-func (c *ReqContext) GetReplyChannel() *ReplyChannelManager {
+func (c *ClientContext) GetReplyChannel() *ReplyChannelManager {
 	return c.replyManager
 }
 
-func (c *ReqContext) Close() error {
+func (c *ClientContext) NewHandleContext(msg ParseMsg) *HandleContext {
+	return &HandleContext{
+		context:      c.context,
+		parseMsg:     msg,
+		replyManager: c.replyManager,
+	}
+}
+
+func (c *ClientContext) Close() error {
 	c.replyManager.CloseAll()
 	close(c.parseMsg)
 	return nil
 }
 
-func (c *ReqContext) GetParseMsgChan() chan ParseMsg {
+// 사용x
+func (c *ClientContext) GetParseMsgChan() chan ParseMsg {
 	return c.parseMsg
+}
+
+type HandleContext struct {
+	context      context.Context
+	parseMsg     ParseMsg
+	replyManager *ReplyChannelManager
+}
+
+func (c *HandleContext) GetContext() context.Context {
+	return c.context
+}
+
+func (c *HandleContext) GetParseMsg() ParseMsg {
+	return c.parseMsg
+}
+
+func (c *HandleContext) GetReplyChannel() *ReplyChannelManager {
+	return c.replyManager
 }
