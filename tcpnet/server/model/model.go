@@ -2,6 +2,7 @@ package tcpmd
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
@@ -124,6 +125,10 @@ type ClientContext struct {
 	context      context.Context
 	parseMsg     chan ParseMsg
 	replyManager *ReplyChannelManager
+
+	// for parseMsg
+	mu     sync.RWMutex
+	closed bool
 }
 
 func NewClientContext(ctx context.Context, msgChannelSize int) *ClientContext {
@@ -156,8 +161,22 @@ func (c *ClientContext) GetParsedMsg() (ParseMsg, bool) {
 	}
 }
 
-func (c *ClientContext) SetParsedMsg(msg ParseMsg) {
-	c.parseMsg <- msg
+func (c *ClientContext) SetParsedMsg(msg ParseMsg) error {
+	c.mu.RLock()
+	ch := c.parseMsg
+	c.mu.RUnlock()
+
+	if ch == nil {
+		return fmt.Errorf("cancelled client context")
+	}
+
+	select {
+	case c.parseMsg <- msg:
+	case <-c.context.Done():
+		return nil
+	}
+
+	return nil
 }
 
 func (c *ClientContext) GetReplyChannel() *ReplyChannelManager {
@@ -173,8 +192,18 @@ func (c *ClientContext) NewHandleContext(msg ParseMsg) *HandleContext {
 }
 
 func (c *ClientContext) Close() error {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil
+	}
+	c.closed = true
+	parseChan := c.parseMsg
+	c.parseMsg = nil
+	c.mu.Unlock()
+
 	c.replyManager.CloseAll()
-	close(c.parseMsg)
+	close(parseChan)
 	return nil
 }
 
