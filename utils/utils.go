@@ -1,8 +1,11 @@
 package utils
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"math"
+	"os"
 	"reflect"
 	"time"
 
@@ -260,4 +263,28 @@ func setFieldValue(field reflect.Value, newValue interface{}, fieldName string) 
 
 	field.Set(newVal)
 	return nil
+}
+
+// *SHA256 체크섬 계산
+func CalculateChecksumFromFile(file *os.File) ([32]byte, error) {
+
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return [32]byte{}, fmt.Errorf("failed to seek file: %w", err)
+	}
+
+	hash := sha256.New()
+
+	if _, err := io.Copy(hash, file); err != nil {
+		return [32]byte{}, fmt.Errorf("failed to read file for checksum: %w", err)
+	}
+
+	// 파일 포인터를 다시 처음으로 되돌림 (재사용 가능하도록)
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return [32]byte{}, fmt.Errorf("failed to reset file pointer: %w", err)
+	}
+
+	var checksum [32]byte
+	copy(checksum[:], hash.Sum(nil))
+
+	return checksum, nil
 }
