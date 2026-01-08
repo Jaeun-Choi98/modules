@@ -171,13 +171,13 @@ err = ch.QueueBind(
               ContentType: "text/plain",
               Body:        []byte(body),
       })
-      //======Producer======//
-      err = ch.QueueBind(
-      q.Name, // queue name
-      "routingKey", // routingKey인 메세지만 Exchange로 부터 수신 받음.
-      "logs", // exchange
-      false,
-      nil,
+    //======Consumer======//
+    err = ch.QueueBind(
+    q.Name, // queue name
+    "routingKey", // routingKey인 메세지만 Exchange로 부터 수신 받음.
+    "exchagneName", // exchange
+    false,
+    nil,
     )
     ```
     
