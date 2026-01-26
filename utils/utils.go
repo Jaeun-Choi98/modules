@@ -72,6 +72,17 @@ func DeepCopy(src, dst interface{}) {
 }
 
 func DeepCopyValue(src, dst reflect.Value) {
+
+	// unexported 필드는 건너뛰기
+	if !dst.CanSet() {
+		return
+	}
+
+	if isSpecialType(dst.Type()) {
+		dst.Set(src)
+		return
+	}
+
 	switch src.Kind() {
 	case reflect.Pointer:
 		if !src.IsNil() {
@@ -113,6 +124,21 @@ func DeepCopyValue(src, dst reflect.Value) {
 	default:
 		dst.Set(src)
 	}
+}
+
+func isSpecialType(t reflect.Type) bool {
+	specialTypes := []reflect.Type{
+		reflect.TypeOf(time.Time{}),
+		reflect.TypeOf(time.Duration(0)),
+	}
+
+	for _, st := range specialTypes {
+		if t == st {
+			return true
+		}
+	}
+
+	return false
 }
 
 /**
