@@ -48,7 +48,10 @@ func (s *ServerBase) SetListeningState(state bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.isListening = state
-	s.listener = nil
+	if !state && s.listener != nil {
+		s.listener.Close()
+		s.listener = nil
+	}
 }
 
 func (s *ServerBase) SetIpAndPort(ip, port string) {
@@ -199,7 +202,11 @@ func (s *ServerBase) CheckConnection() bool {
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 			if s.timeOutCnt >= s.maxTimeOutCnt {
 				s.timeOutCnt = 0
-				listener.Close()
+				s.mu.Lock()
+				if s.listener != nil {
+					s.listener.Close()
+				}
+				s.mu.Unlock()
 				s.SetListeningState(false)
 				return false
 			}
