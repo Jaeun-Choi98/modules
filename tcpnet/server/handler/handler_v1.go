@@ -19,6 +19,7 @@ func (f HandlerFunc) handle(c *tcpmd.HandleContext) error {
 
 type ManagerInterface interface {
 	HandleMessage(c *tcpmd.ClientContext) error
+	HandleMessageSync(c *tcpmd.ClientContext) error
 	RegisterHandle(packetId any, handle HandlerFunc)
 	RegisterHandler(packetId any, handler HandlerInterface)
 }
@@ -63,6 +64,37 @@ func (h *Manager[T]) HandleMessage(c *tcpmd.ClientContext) error {
 			log.Printf("error in handling packet: %+v", err)
 		}
 	}()
+	return nil
+}
+
+func (h *Manager[T]) HandleMessageSync(c *tcpmd.ClientContext) error {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Println("panic in handling packet")
+		}
+	}()
+
+	msg, ok := c.GetParsedMsg()
+	if !ok {
+		return errNotExistsMsg
+	}
+
+	h.mu.RLock()
+	handler, exists := h.handlers[msg.GetPacketId().(T)]
+	h.mu.RUnlock()
+
+	if !exists {
+		return errNotExistsHandlerType
+	}
+
+	if handler == nil {
+		return errNilHandler
+	}
+
+	if err := handler.handle(c.NewHandleContext(msg)); err != nil {
+		log.Printf("error in handling packet: %+v", err)
+	}
+
 	return nil
 }
 
