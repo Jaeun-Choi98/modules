@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"sync"
@@ -16,10 +15,7 @@ type ClientBase struct {
 	ip   string
 	port string
 
-	rxAndParsingFunc func(conn net.Conn) (any, error)
-	parsingErrCnt    int
-
-	handlePacket func(any) error
+	handleConnectFunc func(conn net.Conn)
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -61,16 +57,10 @@ func (c *ClientBase) SetIpAndPort(ip, port string) {
 	c.port = port
 }
 
-func (c *ClientBase) SetRxAndParsingFunc(f func(conn net.Conn) (any, error)) {
+func (c *ClientBase) SetHandleConnectFunc(f func(conn net.Conn)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.rxAndParsingFunc = f
-}
-
-func (c *ClientBase) SetHandlePacket(f func(any) error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.handlePacket = f
+	c.handleConnectFunc = f
 }
 
 func (c *ClientBase) Connect() error {
@@ -93,12 +83,9 @@ func (c *ClientBase) Connect() error {
 }
 
 func (c *ClientBase) Start() error {
-	if c.rxAndParsingFunc == nil {
-		return fmt.Errorf("parsing func is nil")
-	}
 
-	if c.handlePacket == nil {
-		return fmt.Errorf("handle packet func is nil")
+	if c.handleConnectFunc == nil {
+		return fmt.Errorf("handle connect func is nil")
 	}
 
 	// 초기 연결
@@ -106,44 +93,8 @@ func (c *ClientBase) Start() error {
 		return err
 	}
 
-	c.wg.Add(1)
-	return c.WaitForReceiveMessage()
-}
-
-func (c *ClientBase) WaitForReceiveMessage() error {
-	defer c.wg.Done()
-	for {
-
-		select {
-		case <-c.ctx.Done():
-			return nil
-		default:
-		}
-
-		if !c.IsConnected() {
-			time.Sleep(1 * time.Second)
-			continue
-		}
-
-		parsedPacket, err := c.rxAndParsingFunc(c.conn)
-		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				continue
-			}
-			// if EOF, normally exit
-			if err == io.EOF || c.parsingErrCnt > 4 {
-				c.SetConnectionState(false)
-				return err
-			}
-			c.parsingErrCnt++
-			continue
-		}
-
-		if err := c.handlePacket(parsedPacket); err != nil {
-			log.Printf("failed to handlePacket. error: %+v", err)
-		}
-
-	}
+	go c.handleConnectFunc(c.conn)
+	return nil
 }
 
 func (c *ClientBase) SendMessage(msg []byte, timeout time.Duration) error {
