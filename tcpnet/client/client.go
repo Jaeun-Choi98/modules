@@ -82,18 +82,24 @@ func (c *ClientBase) Connect() error {
 	return nil
 }
 
-func (c *ClientBase) Start() error {
+func (c *ClientBase) Start() (rstErr error) {
+
+	defer func() {
+		if r := recover(); r != nil {
+			rstErr = fmt.Errorf("panic in ClientBase.Start, %v", r)
+		}
+	}()
 
 	if c.handleConnectFunc == nil {
-		return fmt.Errorf("handle connect func is nil")
+		rstErr = fmt.Errorf("handle connect func is nil")
 	}
 
 	// 초기 연결
 	if err := c.Connect(); err != nil {
-		return err
+		rstErr = err
 	}
 
-	go c.handleConnectFunc(c.conn)
+	c.handleConnectFunc(c.conn)
 	return nil
 }
 
