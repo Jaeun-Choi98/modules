@@ -11,24 +11,6 @@ type Reply interface {
 	GetErr() error
 }
 
-// type ReplyCode interface {
-// 	GetReplyCode() any
-// }
-
-// type GenericReplyCode[T any] struct {
-// 	Code T
-// }
-
-// func NewReplyCode[T any](code T) *GenericReplyCode[T] {
-// 	return &GenericReplyCode[T]{
-// 		Code: code,
-// 	}
-// }
-
-// func (r *GenericReplyCode[T]) GetReplyCode() any {
-// 	return r.Code
-// }
-
 type GenericReply[T any] struct {
 	Payload T
 	Err     error
@@ -121,7 +103,7 @@ func (m *ReplyChannelManager) CloseAll() {
 	}
 }
 
-type ClientContext struct {
+type ConnContext struct {
 	context      context.Context
 	parseMsg     chan ParseMsg
 	replyManager *ReplyChannelManager
@@ -131,8 +113,8 @@ type ClientContext struct {
 	closed bool
 }
 
-func NewClientContext(ctx context.Context, msgChannelSize int) *ClientContext {
-	return &ClientContext{
+func NewConnContext(ctx context.Context, msgChannelSize int) *ConnContext {
+	return &ConnContext{
 		context:  ctx,
 		parseMsg: make(chan ParseMsg, msgChannelSize),
 		replyManager: &ReplyChannelManager{
@@ -141,15 +123,11 @@ func NewClientContext(ctx context.Context, msgChannelSize int) *ClientContext {
 	}
 }
 
-func (c *ClientContext) GetContext() context.Context {
+func (c *ConnContext) GetContext() context.Context {
 	return c.context
 }
 
-// func (c *Context) SetContext(ctx context.Context) {
-// 	c.context = ctx
-// }
-
-func (c *ClientContext) GetParsedMsg() (ParseMsg, bool) {
+func (c *ConnContext) GetParsedMsg() (ParseMsg, bool) {
 	select {
 	case msg, ok := <-c.parseMsg:
 		if !ok {
@@ -161,7 +139,7 @@ func (c *ClientContext) GetParsedMsg() (ParseMsg, bool) {
 	}
 }
 
-func (c *ClientContext) SetParsedMsg(msg ParseMsg) error {
+func (c *ConnContext) SetParsedMsg(msg ParseMsg) error {
 	c.mu.RLock()
 	ch := c.parseMsg
 	c.mu.RUnlock()
@@ -179,11 +157,11 @@ func (c *ClientContext) SetParsedMsg(msg ParseMsg) error {
 	return nil
 }
 
-func (c *ClientContext) GetReplyChannel() *ReplyChannelManager {
+func (c *ConnContext) GetReplyChannel() *ReplyChannelManager {
 	return c.replyManager
 }
 
-func (c *ClientContext) NewHandleContext(msg ParseMsg) *HandleContext {
+func (c *ConnContext) NewHandleContext(msg ParseMsg) *HandleContext {
 	return &HandleContext{
 		context:      c.context,
 		parseMsg:     msg,
@@ -191,7 +169,7 @@ func (c *ClientContext) NewHandleContext(msg ParseMsg) *HandleContext {
 	}
 }
 
-func (c *ClientContext) Close() error {
+func (c *ConnContext) Close() error {
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -205,11 +183,6 @@ func (c *ClientContext) Close() error {
 	c.replyManager.CloseAll()
 	close(parseChan)
 	return nil
-}
-
-// 사용x
-func (c *ClientContext) GetParseMsgChan() chan ParseMsg {
-	return c.parseMsg
 }
 
 type HandleContext struct {

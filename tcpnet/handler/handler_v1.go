@@ -4,7 +4,7 @@ import (
 	"log"
 	"sync"
 
-	tcpmd "github.com/Jaeun-Choi98/modules/tcpnet/server/model"
+	tcpmd "github.com/Jaeun-Choi98/modules/tcpnet/model"
 )
 
 type HandlerInterface interface {
@@ -18,8 +18,8 @@ func (f HandlerFunc) handle(c *tcpmd.HandleContext) error {
 }
 
 type ManagerInterface interface {
-	HandleMessage(c *tcpmd.ClientContext) error
-	HandleMessageSync(c *tcpmd.ClientContext) error
+	HandleMessage(c *tcpmd.ConnContext) error
+	HandleMessageSync(c *tcpmd.ConnContext) error
 	RegisterHandle(packetId any, handle HandlerFunc)
 	RegisterHandler(packetId any, handler HandlerInterface)
 }
@@ -35,7 +35,7 @@ func NewV1[T MsgType]() *Manager[T] {
 	}
 }
 
-func (h *Manager[T]) HandleMessage(c *tcpmd.ClientContext) error {
+func (h *Manager[T]) HandleMessage(c *tcpmd.ConnContext) error {
 
 	msg, ok := c.GetParsedMsg()
 	if !ok {
@@ -67,7 +67,7 @@ func (h *Manager[T]) HandleMessage(c *tcpmd.ClientContext) error {
 	return nil
 }
 
-func (h *Manager[T]) HandleMessageSync(c *tcpmd.ClientContext) error {
+func (h *Manager[T]) HandleMessageSync(c *tcpmd.ConnContext) error {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Println("panic in handling packet")
