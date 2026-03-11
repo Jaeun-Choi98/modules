@@ -34,7 +34,10 @@ func NewSerialBase(ctx context.Context) *SerialBase {
 func (s *SerialBase) Shutdown() error {
 	s.cancel()
 	s.wg.Wait()
-	return s.port.Close()
+	if s.port != nil {
+		return s.port.Close()
+	}
+	return nil
 }
 
 func (s *SerialBase) SetPortAndMode(portName string, mode *serial.Mode) {
