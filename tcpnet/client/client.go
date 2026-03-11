@@ -92,11 +92,13 @@ func (c *ClientBase) Start() (rstErr error) {
 
 	if c.handleConnectFunc == nil {
 		rstErr = fmt.Errorf("handle connect func is nil")
+		return
 	}
 
 	// 초기 연결
 	if err := c.Connect(); err != nil {
 		rstErr = err
+		return
 	}
 
 	c.handleConnectFunc(c.conn)
