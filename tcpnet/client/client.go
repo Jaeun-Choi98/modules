@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -86,7 +87,9 @@ func (c *ClientBase) Start() (rstErr error) {
 
 	defer func() {
 		if r := recover(); r != nil {
-			rstErr = fmt.Errorf("panic in ClientBase.Start, %v", r)
+			buf := make([]byte, 4096)
+			n := runtime.Stack(buf, false)
+			rstErr = fmt.Errorf("panic in ClientBase.Start, %v\n%s", r, buf[:n])
 		}
 	}()
 
