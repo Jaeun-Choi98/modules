@@ -187,7 +187,7 @@ err = ch.QueueBind(
     <reg 규칙>
     1. 점으로 구분된 단어 목록
     2. * (별표)는 정확히 하나의 단어를 대체. e.g. *.Orange → one.Orange, two.Orange
-    3. # (해시)는 0개 이상의 단어를 대체. e.g. #.Orange → one.Orange, one.two.Orange
+    3. \# (해시)는 0개 이상의 단어를 대체. e.g. #.Orange → one.Orange, one.two.Orange
     - Headers
     라우팅 키를 사용하지 않고 메시지의 Headers 테이블과 비교.
     더 자세한건 채팅AI ㄱㄱ…
