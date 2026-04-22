@@ -5,7 +5,7 @@ import (
 	"log"
 	"sync"
 
-	serialmd "github.com/Jaeun-Choi98/modules/serialport/model"
+	serialmd "github.com/Jaeun-Choi98/modules/serialport/advanced/model"
 )
 
 var (

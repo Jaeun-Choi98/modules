@@ -1,11 +1,22 @@
 package handler
 
 import (
+	"errors"
 	"log"
 	"sync"
 
-	tcpmd "github.com/Jaeun-Choi98/modules/tcpnet/model"
+	tcpmd "github.com/Jaeun-Choi98/modules/tcpnet/advanced/model"
 )
+
+var (
+	errNotExistsHandlerType = errors.New("not exsits registered handler about packet.GetPacketId")
+	errNilHandler           = errors.New("nil handler")
+	errNotExistsMsg         = errors.New("not exists parsed massage")
+)
+
+type MsgType interface {
+	byte | int8 | int16 | uint16 | int | int32 | uint32 | int64 | uint64 | float32 | float64 | string
+}
 
 type HandlerInterface interface {
 	handle(c *tcpmd.HandleContext) error
@@ -29,7 +40,7 @@ type Manager[T MsgType] struct {
 	mu       sync.RWMutex
 }
 
-func NewV1[T MsgType]() *Manager[T] {
+func New[T MsgType]() *Manager[T] {
 	return &Manager[T]{
 		handlers: make(map[T]HandlerInterface),
 	}

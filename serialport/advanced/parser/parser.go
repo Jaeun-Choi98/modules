@@ -1,7 +1,7 @@
 package serialparser
 
 import (
-	serialmd "github.com/Jaeun-Choi98/modules/serialport/model"
+	serialmd "github.com/Jaeun-Choi98/modules/serialport/advanced/model"
 	"go.bug.st/serial"
 )
 
