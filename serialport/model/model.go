@@ -1,4 +1,4 @@
-package serailmd
+package serialmd
 
 import (
 	"context"
