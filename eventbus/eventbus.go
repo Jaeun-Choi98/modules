@@ -2,146 +2,197 @@ package eventbus
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
-
-/**
- * EventBus provides a communication mechanism between different parts of the application.
- * It implements a publish-subscribe pattern.
- *
- * -> deprecated this package. use github.com/Jaeun-Choi98/eventbus (same source code).
- */
-
-type TopicType interface {
-	byte | int8 | int16 | uint16 | int | int32 | uint32 | int64 | uint64 | float32 | float64 | string
-}
-
-type Topic[T TopicType] interface {
-	GetEventType() T
-}
 
 type Event interface {
 	GetEventId() uint32
 }
 
-type EventBus[T TopicType] struct {
-	subscribers map[T][]chan Event
+// HandlerFunc는 이벤트를 처리하고 응답값과 에러를 반환.
+// Publish에서는 반환값이 무시되고, Request에서는 응답으로 수집됨.
+type HandlerFunc func(Event) (any, error)
 
-	processedMsgs   map[uint32]time.Time
-	cleanupDuration time.Duration
+// DroppedEventFunc는 Publish 중 핸들러가 에러를 반환했을 때 호출되는 콜백.
+type DroppedEventFunc func(topic string, event Event, err error)
 
-	mu sync.RWMutex
+type subscription struct {
+	id      uint64
+	handler HandlerFunc
+}
+
+type EventBus struct {
+	subscribers    map[string][]*subscription
+	droppedHandler DroppedEventFunc
+
+	mu           sync.RWMutex
+	subIdCounter uint64
 
 	ctx    context.Context
 	cancel context.CancelFunc
-	wg     sync.WaitGroup
 }
 
-func NewEventBus[T TopicType](pctx context.Context, duration time.Duration) *EventBus[T] {
+func NewEventBus(pctx context.Context) *EventBus {
 	ctx, cancel := context.WithCancel(pctx)
-	eb := &EventBus[T]{
-		subscribers:     make(map[T][]chan Event),
-		processedMsgs:   make(map[uint32]time.Time),
-		cleanupDuration: duration,
-		ctx:             ctx,
-		cancel:          cancel,
+	return &EventBus{
+		subscribers: make(map[string][]*subscription),
+		ctx:         ctx,
+		cancel:      cancel,
+	}
+}
+
+// SetDroppedEventHandler는 Publish 중 핸들러 에러 발생 시 호출될 콜백을 등록.
+func (b *EventBus) SetDroppedEventHandler(f DroppedEventFunc) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.droppedHandler = f
+}
+
+// Subscribe는 핸들러를 등록하고 unsubscribe 함수를 반환.
+// 반환된 func()를 호출하면 구독이 해제됨.
+func (b *EventBus) Subscribe(topic string, handler HandlerFunc) func() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.subIdCounter++
+	id := b.subIdCounter
+	b.subscribers[topic] = append(b.subscribers[topic], &subscription{id: id, handler: handler})
+
+	return func() {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		subs := b.subscribers[topic]
+		for i, s := range subs {
+			if s.id == id {
+				b.subscribers[topic] = append(subs[:i], subs[i+1:]...)
+				return
+			}
+		}
+	}
+}
+
+// Publish는 이벤트를 비동기로 발행 (fire-and-forget).
+// 핸들러가 에러를 반환하면 DroppedEventHandler가 호출됨.
+func (b *EventBus) Publish(topic string, event Event) {
+	handlers, dropped := b.copyHandlers(topic)
+	for _, h := range handlers {
+		go func(handler HandlerFunc) {
+			defer func() { recover() }()
+			if _, err := handler(event); err != nil && dropped != nil {
+				dropped(topic, event, err)
+			}
+		}(h)
+	}
+}
+
+// PublishSync는 모든 핸들러가 완료될 때까지 대기하고 에러 목록을 반환.
+// 핸들러들은 병렬로 실행됨.
+func (b *EventBus) PublishSync(topic string, event Event) []error {
+	handlers, _ := b.copyHandlers(topic)
+
+	var (
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		errs []error
+	)
+
+	for _, h := range handlers {
+		wg.Add(1)
+		go func(handler HandlerFunc) {
+			var err error
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("panic: %v", r)
+				}
+				if err != nil {
+					mu.Lock()
+					errs = append(errs, err)
+					mu.Unlock()
+				}
+				wg.Done()
+			}()
+			_, err = handler(event)
+		}(h)
 	}
 
-	eb.wg.Add(1)
-	go eb.cleanupOldMessages()
-
-	return eb
+	wg.Wait()
+	return errs
 }
 
-func (b *EventBus[T]) cleanupOldMessages() {
+// Request는 이벤트를 발행하고 timeout 내에 모든 핸들러의 응답을 수집해서 반환.
+// 핸들러들은 병렬로 실행되며, timeout 초과 시 수집된 결과까지만 반환.
+func (b *EventBus) Request(topic string, event Event, timeout time.Duration) ([]any, []error) {
+	handlers, _ := b.copyHandlers(topic)
 
-	cleanupTicker := time.NewTicker(b.cleanupDuration)
+	type result struct {
+		reply any
+		err   error
+	}
 
-	defer func() {
-		b.wg.Done()
-		cleanupTicker.Stop()
+	resultCh := make(chan result, len(handlers))
+
+	var wg sync.WaitGroup
+	for _, h := range handlers {
+		wg.Add(1)
+		go func(handler HandlerFunc) {
+			var r result
+			func() {
+				defer func() {
+					if rec := recover(); rec != nil {
+						r.err = fmt.Errorf("panic: %v", rec)
+					}
+				}()
+				r.reply, r.err = handler(event)
+			}()
+			resultCh <- r
+			wg.Done()
+		}(h)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultCh)
 	}()
+
+	ctx, cancel := context.WithTimeout(b.ctx, timeout)
+	defer cancel()
+
+	replies := make([]any, 0, len(handlers))
+	errs := make([]error, 0)
 
 	for {
 		select {
-		case <-cleanupTicker.C:
-			b.mu.Lock()
-			cutoff := time.Now().Add(-b.cleanupDuration)
-			for id, timestamp := range b.processedMsgs {
-				if timestamp.Before(cutoff) {
-					delete(b.processedMsgs, id)
-				}
+		case r, ok := <-resultCh:
+			if !ok {
+				return replies, errs
 			}
-			b.mu.Unlock()
-
-		case <-b.ctx.Done():
-			return
+			if r.err != nil {
+				errs = append(errs, r.err)
+			} else {
+				replies = append(replies, r.reply)
+			}
+		case <-ctx.Done():
+			return replies, append(errs, fmt.Errorf("request timeout after %v", timeout))
 		}
 	}
 }
 
-func (b *EventBus[T]) Subscribe(topic Topic[T], cap int) chan Event {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	ch := make(chan Event, cap)
-	b.subscribers[topic.GetEventType()] = append(b.subscribers[topic.GetEventType()], ch)
-	return ch
-}
-
-func (b *EventBus[T]) Unsubscribe(topic Topic[T], ch chan Event) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	if subs, exsits := b.subscribers[topic.GetEventType()]; exsits {
-		for i, sub := range subs {
-			if sub == ch {
-				close(ch)
-				b.subscribers[topic.GetEventType()] = append(subs[:i], subs[i+1:]...)
-				break
-			}
-		}
-	}
-}
-
-func (b *EventBus[T]) Publish(topic Topic[T], event Event) {
-	b.mu.RLock()
-	if _, exists := b.processedMsgs[event.GetEventId()]; exists {
-		return
-	}
-	b.mu.RUnlock()
-
-	b.mu.Lock()
-	b.processedMsgs[event.GetEventId()] = time.Now()
-	b.mu.Unlock()
-
-	b.mu.RLock()
-	if subs, found := b.subscribers[topic.GetEventType()]; found {
-		for _, ch := range subs {
-			select {
-			case ch <- event:
-			default:
-
-			}
-		}
-	}
-	b.mu.RUnlock()
-}
-
-func (b *EventBus[T]) Close() {
+func (b *EventBus) Close() {
 	b.cancel()
-	b.wg.Wait()
-
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.subscribers = make(map[string][]*subscription)
+}
 
-	for topicType, subs := range b.subscribers {
-		for _, ch := range subs {
-			for len(ch) > 0 {
-				<-ch
-			}
-			close(ch)
-		}
-		delete(b.subscribers, topicType)
+func (b *EventBus) copyHandlers(topic string) ([]HandlerFunc, DroppedEventFunc) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	subs := b.subscribers[topic]
+	handlers := make([]HandlerFunc, len(subs))
+	for i, sub := range subs {
+		handlers[i] = sub.handler
 	}
+	return handlers, b.droppedHandler
 }
