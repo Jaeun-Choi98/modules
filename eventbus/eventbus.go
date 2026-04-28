@@ -7,20 +7,14 @@ import (
 	"time"
 )
 
-type Event interface {
-	GetEventId() uint32
-}
-
-// HandlerFunc는 이벤트를 처리하고 응답값과 에러를 반환.
-// Publish에서는 반환값이 무시되고, Request에서는 응답으로 수집됨.
-type HandlerFunc func(Event) (any, error)
-
 // DroppedEventFunc는 Publish 중 핸들러가 에러를 반환했을 때 호출되는 콜백.
-type DroppedEventFunc func(topic string, event Event, err error)
+type DroppedEventFunc func(topic string, event any, err error)
+
+type handlerFunc func(any) (any, error)
 
 type subscription struct {
 	id      uint64
-	handler HandlerFunc
+	handler handlerFunc
 }
 
 type EventBus struct {
@@ -50,9 +44,14 @@ func (b *EventBus) SetDroppedEventHandler(f DroppedEventFunc) {
 	b.droppedHandler = f
 }
 
-// Subscribe는 핸들러를 등록하고 unsubscribe 함수를 반환.
-// 반환된 func()를 호출하면 구독이 해제됨.
-func (b *EventBus) Subscribe(topic string, handler HandlerFunc) func() {
+func (b *EventBus) Close() {
+	b.cancel()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.subscribers = make(map[string][]*subscription)
+}
+
+func (b *EventBus) subscribe(topic string, handler handlerFunc) func() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -73,12 +72,10 @@ func (b *EventBus) Subscribe(topic string, handler HandlerFunc) func() {
 	}
 }
 
-// Publish는 이벤트를 비동기로 발행 (fire-and-forget).
-// 핸들러가 에러를 반환하면 DroppedEventHandler가 호출됨.
-func (b *EventBus) Publish(topic string, event Event) {
+func (b *EventBus) publish(topic string, event any) {
 	handlers, dropped := b.copyHandlers(topic)
 	for _, h := range handlers {
-		go func(handler HandlerFunc) {
+		go func(handler handlerFunc) {
 			defer func() { recover() }()
 			if _, err := handler(event); err != nil && dropped != nil {
 				dropped(topic, event, err)
@@ -87,9 +84,7 @@ func (b *EventBus) Publish(topic string, event Event) {
 	}
 }
 
-// PublishSync는 모든 핸들러가 완료될 때까지 대기하고 에러 목록을 반환.
-// 핸들러들은 병렬로 실행됨.
-func (b *EventBus) PublishSync(topic string, event Event) []error {
+func (b *EventBus) publishSync(topic string, event any) []error {
 	handlers, _ := b.copyHandlers(topic)
 
 	var (
@@ -100,7 +95,7 @@ func (b *EventBus) PublishSync(topic string, event Event) []error {
 
 	for _, h := range handlers {
 		wg.Add(1)
-		go func(handler HandlerFunc) {
+		go func(handler handlerFunc) {
 			var err error
 			defer func() {
 				if r := recover(); r != nil {
@@ -121,9 +116,7 @@ func (b *EventBus) PublishSync(topic string, event Event) []error {
 	return errs
 }
 
-// Request는 이벤트를 발행하고 timeout 내에 모든 핸들러의 응답을 수집해서 반환.
-// 핸들러들은 병렬로 실행되며, timeout 초과 시 수집된 결과까지만 반환.
-func (b *EventBus) Request(topic string, event Event, timeout time.Duration) ([]any, []error) {
+func (b *EventBus) request(topic string, event any, timeout time.Duration) ([]any, []error) {
 	handlers, _ := b.copyHandlers(topic)
 
 	type result struct {
@@ -136,7 +129,7 @@ func (b *EventBus) Request(topic string, event Event, timeout time.Duration) ([]
 	var wg sync.WaitGroup
 	for _, h := range handlers {
 		wg.Add(1)
-		go func(handler HandlerFunc) {
+		go func(handler handlerFunc) {
 			var r result
 			func() {
 				defer func() {
@@ -179,20 +172,42 @@ func (b *EventBus) Request(topic string, event Event, timeout time.Duration) ([]
 	}
 }
 
-func (b *EventBus) Close() {
-	b.cancel()
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.subscribers = make(map[string][]*subscription)
-}
-
-func (b *EventBus) copyHandlers(topic string) ([]HandlerFunc, DroppedEventFunc) {
+func (b *EventBus) copyHandlers(topic string) ([]handlerFunc, DroppedEventFunc) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	subs := b.subscribers[topic]
-	handlers := make([]HandlerFunc, len(subs))
+	handlers := make([]handlerFunc, len(subs))
 	for i, sub := range subs {
 		handlers[i] = sub.handler
 	}
 	return handlers, b.droppedHandler
+}
+
+// Subscribe는 타입 안전한 핸들러를 등록하고 unsubscribe 함수를 반환.
+// 내부적으로 any로 전달된 이벤트를 E로 단언하며, 타입 불일치 시 에러를 반환.
+func Subscribe[E any](b *EventBus, topic string, handler func(E) (any, error)) func() {
+	return b.subscribe(topic, func(event any) (any, error) {
+		e, ok := event.(E)
+		if !ok {
+			return nil, fmt.Errorf("event type mismatch: expected %T, got %T", *new(E), event)
+		}
+		return handler(e)
+	})
+}
+
+// Publish는 이벤트를 비동기로 발행 (fire-and-forget).
+// 핸들러가 에러를 반환하면 DroppedEventHandler가 호출됨.
+func Publish[E any](b *EventBus, topic string, event E) {
+	b.publish(topic, event)
+}
+
+// PublishSync는 모든 핸들러가 완료될 때까지 대기하고 에러 목록을 반환.
+// 핸들러들은 병렬로 실행됨.
+func PublishSync[E any](b *EventBus, topic string, event E) []error {
+	return b.publishSync(topic, event)
+}
+
+// Request는 이벤트를 발행하고 timeout 내에 모든 핸들러의 응답을 수집해서 반환.
+func Request[E any](b *EventBus, topic string, event E, timeout time.Duration) ([]any, []error) {
+	return b.request(topic, event, timeout)
 }

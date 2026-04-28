@@ -24,10 +24,11 @@
 
 ### 주요 기능
 
-- **`Subscribe(topic, handler)`** — 핸들러를 등록하고 unsubscribe 클로저를 반환합니다.
-- **`Publish(topic, event)`** — 비동기 fire-and-forget 발행. 핸들러 에러는 `DroppedEventHandler`로 전달됩니다.
-- **`PublishSync(topic, event)`** — 모든 핸들러가 완료될 때까지 대기하고 `[]error`를 반환합니다.
-- **`Request(topic, event, timeout)`** — 모든 핸들러 응답을 timeout 내에 수집해 `([]any, []error)`를 반환합니다.
+- **Event 인터페이스 없음** — 어떤 타입이든 이벤트로 사용 가능합니다.
+- **`Subscribe[E]`** — 핸들러를 타입 안전하게 등록하고 unsubscribe 클로저를 반환합니다.
+- **`Publish[E]`** — 비동기 fire-and-forget 발행. 핸들러 에러는 `DroppedEventHandler`로 전달됩니다.
+- **`PublishSync[E]`** — 모든 핸들러가 완료될 때까지 대기하고 `[]error`를 반환합니다.
+- **`Request[E]`** — 모든 핸들러 응답을 timeout 내에 수집해 `([]any, []error)`를 반환합니다.
 
 ### 사용 예시
 
@@ -36,25 +37,25 @@ eb := eventbus.NewEventBus(ctx)
 defer eb.Close()
 
 // 에러 알림 등록
-eb.SetDroppedEventHandler(func(topic string, e eventbus.Event, err error) {
+eb.SetDroppedEventHandler(func(topic string, event any, err error) {
     log.Printf("[dropped] topic=%s err=%v", topic, err)
 })
 
-// 구독 — 반환된 함수로 해제
-unsubscribe := eb.Subscribe("order.created", func(e eventbus.Event) (any, error) {
-    fmt.Println("주문 처리:", e.GetEventId())
+// 구독 — 핸들러가 구체 타입을 바로 받음, 타입 단언 불필요
+unsubscribe := eventbus.Subscribe(eb, "order.created", func(e *OrderEvent) (any, error) {
+    fmt.Println("주문 처리:", e.OrderId)
     return nil, nil
 })
 defer unsubscribe()
 
 // 비동기 발행
-eb.Publish("order.created", event)
+eventbus.Publish(eb, "order.created", &OrderEvent{OrderId: "ORD-001"})
 
 // 동기 발행 — 모든 핸들러 완료 대기
-errs := eb.PublishSync("order.created", event)
+errs := eventbus.PublishSync(eb, "order.created", &OrderEvent{OrderId: "ORD-002"})
 
 // 요청/응답 — 핸들러 반환값 수집
-replies, errs := eb.Request("order.created", event, 3*time.Second)
+replies, errs := eventbus.Request(eb, "order.created", &OrderEvent{OrderId: "ORD-003"}, 3*time.Second)
 ```
 
 자세한 내용은 [eventbus/README.md](eventbus/README.md)를 참고하세요.

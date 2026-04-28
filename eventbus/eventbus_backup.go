@@ -13,6 +13,10 @@ import (
  * -> deprecated this package. use github.com/Jaeun-Choi98/eventbus (same source code).
  */
 
+type Event interface {
+	GetEventId() uint32
+}
+
 type TopicType interface {
 	byte | int8 | int16 | uint16 | int | int32 | uint32 | int64 | uint64 | float32 | float64 | string
 }
