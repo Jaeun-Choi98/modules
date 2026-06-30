@@ -2,6 +2,8 @@ package utils
 
 import (
 	"crypto/sha256"
+	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -313,4 +315,109 @@ func CalculateChecksumFromFile(file *os.File) ([32]byte, error) {
 	copy(checksum[:], hash.Sum(nil))
 
 	return checksum, nil
+}
+
+type Records struct {
+	Main     []map[string]interface{}
+	Children map[string][]map[string]interface{}
+}
+
+/**
+ * json파일을 읽어서 맵 객체로 변환
+ * 중첩 객체도 변환 가능
+ */
+func LoadJsonFile(path string) (*Records, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+
+	var rawList []map[string]interface{}
+	if err := json.Unmarshal(data, &rawList); err != nil {
+		return nil, fmt.Errorf("failed to parse: %w", err)
+	}
+
+	result := &Records{
+		Children: make(map[string][]map[string]interface{}),
+	}
+
+	for _, obj := range rawList {
+		mainRecord := make(map[string]interface{})
+		for k, v := range obj {
+			if _, ok := v.(map[string]interface{}); !ok {
+				mainRecord[k] = v
+			}
+		}
+		result.Main = append(result.Main, mainRecord)
+		extractNested(result, obj, "")
+	}
+
+	return result, nil
+}
+
+func extractNested(result *Records, obj map[string]interface{}, prefix string) {
+	for k, v := range obj {
+		nested, ok := v.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		entityKey := k
+		if prefix != "" {
+			entityKey = prefix + "." + k
+		}
+
+		childRecord := make(map[string]interface{})
+		for ck, cv := range nested {
+			if _, isNested := cv.(map[string]interface{}); !isNested {
+				childRecord[ck] = cv
+			}
+		}
+
+		result.Children[entityKey] = append(result.Children[entityKey], childRecord)
+
+		extractNested(result, nested, entityKey)
+	}
+}
+
+/**
+ * csv파일을 읽어서 맵 객체로 변환
+ * 중첩 객체도 변환 가능
+ */
+func LoadCSVFile(path string) (*Records, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+	defer f.Close()
+
+	reader := csv.NewReader(f)
+
+	headers, err := reader.Read()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read header: %w", err)
+	}
+
+	result := &Records{
+		Children: make(map[string][]map[string]interface{}),
+	}
+
+	for {
+		row, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to read row: %w", err)
+		}
+
+		record := make(map[string]interface{})
+		for i, header := range headers {
+			record[header] = row[i]
+		}
+
+		result.Main = append(result.Main, record)
+	}
+
+	return result, nil
 }
