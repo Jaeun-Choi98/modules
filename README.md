@@ -7,7 +7,7 @@
 ## 패키지 목록
 
 | 패키지 | 설명 |
-|---|---|
+| --- | --- |
 | [eventbus](#eventbus) | 토픽 기반 Pub/Sub 이벤트 버스 |
 | [sse](#sse) | Server-Sent Events 세션 관리 |
 | [tcpnet](#tcpnet) | TCP 서버/클라이언트 + 패킷 핸들러 |
@@ -15,6 +15,7 @@
 | [orm/redisorm](#redisorm) | Redis 기반 제네릭 Repository ORM |
 | [utils](#utils) | 범용 유틸리티 함수 모음 |
 | [shell](#shell) | 쉘 스크립트 실행기 |
+| [logger](#logger) | 날짜별 디렉터리 로그(app.log) + 프레임 hex 덤프(dump.log), 보존 기간 자동 정리 |
 
 ---
 
@@ -224,7 +225,7 @@ func (u *User) GetTTL() time.Duration      { return 0 }
 ### Redis 키 구조
 
 | 키 패턴 | 타입 | 용도 |
-|---|---|---|
+| --- | --- | --- |
 | `{table}:{id}` | JSON | 레코드 본체 |
 | `{table}:idx:{field}` | Hash | 인덱스 필드 → ID 매핑 |
 | `{table}:all_ids` | Set | 전체 ID 목록 |
@@ -326,10 +327,32 @@ fmt.Println(result.Duration)
 
 ---
 
+## logger
+
+```go
+l, err := logger.Init(logger.Options{
+    Dir:        "log",      // log/YYYY/MM/D/app.log, dump.log
+    Level:      lv,         // logger.ParseLevel(cfg.Log.Level)
+    Dump:       cfg.Log.Dump,
+    MaxAgeDays: 3,          // 오늘 + 지난 3일 보존. 음수면 정리 안 함
+    Console:    os.Stderr,  // nil 이면 콘솔 출력 없음
+})
+if err != nil { ... }
+defer logger.Close()
+
+logger.Infof("started")
+logger.Dump("TCP", logger.Tx, clientID, op, frame)
+logger.SetLevel(logger.DEBUG) // 실행 중 변경 (저장 안 됨)
+```
+
+인스턴스를 직접 들고 써도 된다 (`l.Infof`, `l.Dump` …). 한 프로세스에서 로그 디렉터리를 나누고 싶을 때 쓴다.
+
+---
+
 ## 설계 공통 패턴
 
 | 패턴 | 적용 패키지 |
-|---|---|
+| --- | --- |
 | 제네릭 타입 파라미터 | sse, tcpnet, serialport, orm, utils |
 | `context.Context` + `cancel` | 전 패키지 |
 | `sync.RWMutex` 읽기/쓰기 분리 | 전 패키지 |
