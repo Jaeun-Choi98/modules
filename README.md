@@ -11,6 +11,7 @@
 | [eventbus](#eventbus) | 토픽 기반 Pub/Sub 이벤트 버스 |
 | [sse](#sse) | Server-Sent Events 세션 관리 |
 | [tcpnet](#tcpnet) | TCP 서버/클라이언트 + 패킷 핸들러 |
+| [udpnet](#udpnet) | 비연결형 UDP Endpoint + 핑퐁 생존 확인 + 패킷 핸들러 |
 | [serialport](#serialport) | 시리얼 포트 통신 + 패킷 핸들러 |
 | [orm/redisorm](#redisorm) | Redis 기반 제네릭 Repository ORM |
 | [utils](#utils) | 범용 유틸리티 함수 모음 |
@@ -98,7 +99,7 @@ manager.RemoveSession(userId)
 
 ## tcpnet
 
-TCP 네트워크 통신을 위한 패키지입니다. `basic`과 `advanced` 두 레이어로 구성됩니다.
+TCP 네트워크 통신을 위한 패키지입니다. `basic`과 `advanced` 두 레이어로 구성됩니다. 자세한 내용은 [tcpnet/README.md](tcpnet/README.md)를 참고하세요.
 
 ### basic
 
@@ -110,12 +111,15 @@ TCP 네트워크 통신을 위한 패키지입니다. `basic`과 `advanced` 두 
 server, _ := server.NewServerBase(ctx, heartbeat, maxTimeOutCnt)
 server.SetIpAndPort("0.0.0.0", "8080")
 server.SetHandleConnectFunc(func(conn net.Conn) { ... })
-server.Start()
+server.SetPanicHandler(func(conn net.Conn, r any, stack []byte) { ... })
+server.Start() // Shutdown 전까지 블로킹
 ```
 
 - `Listening()` — TCP 리스너를 시작합니다.
-- `StartTCPServerHeartbeat()` — 하트비트로 리스너 상태를 감지하고 자동 재연결합니다.
-- `Shutdown()` — 리스너를 닫고 고루틴을 정리합니다.
+- `StartTCPServerHeartbeat()` — 하트비트로 리스너 상태를 감지하고 리스너를 다시 엽니다.
+- `SetPanicHandler()` — 연결 핸들러 고루틴의 패닉을 복구한 뒤 호출됩니다. 해당 conn은 서버가 닫고 다른 연결은 계속 처리합니다.
+- `ActiveConnCount()` — 현재 핸들러가 실행 중인 연결 수입니다.
+- `Shutdown()` — 리스너와 활성 연결을 모두 닫고, Accept 루프·heartbeat·모든 연결 핸들러가 반환될 때까지 기다립니다. 이후 재시작은 에러를 반환합니다.
 
 #### ClientBase
 
@@ -124,10 +128,11 @@ client, _ := client.NewClientBase(ctx, connectTimeout, heartbeat)
 client.SetIpAndPort("127.0.0.1", "8080")
 client.SetHandleConnectFunc(func(conn net.Conn) { ... })
 client.Start()
-client.SendMessage(data, timeout)
+client.SendMessage(data, timeout) // 연결 전이면 에러 반환
 ```
 
 - `StartTCPClientHeartbeat()` — 하트비트로 연결 상태를 감지하고 자동 재연결합니다.
+- `Shutdown()` — 연결을 닫고 heartbeat 고루틴이 끝날 때까지 기다립니다. 이후 재연결하지 않습니다.
 
 ### advanced
 
@@ -135,9 +140,9 @@ client.SendMessage(data, timeout)
 
 #### model
 
-- **`ConnContext`** — 파싱된 메시지를 채널로 전달하는 연결 컨텍스트입니다.
+- **`ConnContext`** — 파싱된 메시지를 채널로 전달하는 연결 컨텍스트입니다. 닫힌 뒤 `SetParsedMsg`는 `ErrContextClosed`를 반환합니다.
 - **`HandleContext`** — 핸들러 함수에 전달되는 처리 컨텍스트입니다.
-- **`ReplyChannelManager`** — 요청-응답 패턴을 위한 채널 관리자입니다.
+- **`PendingRequests`** — 요청-응답 패턴을 위한 관리자입니다. 요청을 key로 `Register`하고, 응답 패킷을 받으면 `Resolve`로 대기 중인 요청에 `Response`를 전달합니다.
 
 #### parser
 
@@ -166,7 +171,8 @@ manager.HandleMessage(connCtx)
 manager.HandleMessageSync(connCtx)
 ```
 
-패킷 ID 타입을 제네릭으로 지정하며, 핸들러를 ID별로 등록해 자동 디스패치합니다.
+패킷 ID 타입을 제네릭으로 지정하며, 핸들러를 ID별로 등록해 자동 디스패치합니다.  
+메시지의 packetId 타입이 다르면 에러를 반환하고, `HandleMessageSync`는 핸들러 패닉을 에러로 변환해 반환합니다.
 
 #### serializer
 
@@ -179,6 +185,59 @@ data := writer.
     WriteUint32(payloadLen).
     WriteBytes(payload).
     Bytes()
+```
+
+---
+
+## udpnet
+
+비연결형 UDP 통신을 위한 패키지입니다. 연결 상태나 재연결 개념 없이 `Endpoint` 하나로 송수신하고, 상대의 수신 가능 여부는 핑퐁으로 확인합니다. 자세한 내용은 [udpnet/README.md](udpnet/README.md)를 참고하세요.
+
+### Endpoint
+
+```go
+ep, _ := udpnet.NewEndpoint(ctx, udpnet.Config{
+    LocalAddr:    ":7000", // 수신 포트
+    SendBindAddr: ":7100", // (선택) 송신 전용 소켓 = 출발 포트
+})
+ep.SetHandler(func(data []byte, src *net.UDPAddr) {
+    ep.SendTo(resp, &net.UDPAddr{IP: src.IP, Port: 9001}) // 상대 수신 포트가 다르면 직접 지정
+})
+ep.Start()
+defer ep.Shutdown()
+
+ep.SendTo(data, device)
+```
+
+- `SendBindAddr` — 송신 소켓을 수신 소켓과 분리합니다 (목적지가 아니라 출발 주소).
+- `MulticastGroup`, `MulticastInterface` — 멀티캐스트 그룹에 가입해 수신합니다. 브로드캐스트는 `SendTo`로 전송합니다.
+- `SetPanicHandler()` — 패킷 핸들러 패닉을 복구한 뒤 호출됩니다.
+- `Shutdown()` — 수신을 멈추고 처리 중인 핸들러가 끝날 때까지 기다린 뒤 소켓을 닫습니다 (그동안 응답 전송 가능).
+
+### Probe
+
+```go
+probe, _ := ep.StartProbe(udpnet.Probe{
+    Target:   "192.168.0.10:6000",
+    Interval: time.Second,
+    Ping:     []byte{0x01},
+    IsPong:   func(data []byte, _ *net.UDPAddr) bool { return data[0] == 0x81 },
+    OnChange: func(reachable bool) { ... },
+})
+probe.Reachable()
+```
+
+대상 IP에서 온 패킷은 pong이 아니어도 생존 신호로 보며, 트래픽이 있는 동안에는 ping을 생략합니다.
+
+### advanced
+
+tcpnet과 같은 `parser` / `model` / `handler` / `serializer` 구조입니다.  
+`SessionContext`는 `Sender`(`Endpoint`가 구현)를 받아 핸들러에서 `HandleContext.Send` / `SendTo`로 전송하며, 요청-응답 대기는 `PendingRequests`를 사용합니다.
+
+```go
+type Parser interface {
+    Parse(data []byte, addr *net.UDPAddr) (udpmd.ParseMsg, error)
+}
 ```
 
 ---
@@ -353,9 +412,11 @@ logger.SetLevel(logger.DEBUG) // 실행 중 변경 (저장 안 됨)
 
 | 패턴 | 적용 패키지 |
 | --- | --- |
-| 제네릭 타입 파라미터 | sse, tcpnet, serialport, orm, utils |
+| 제네릭 타입 파라미터 | sse, tcpnet, udpnet, serialport, orm, utils |
 | `context.Context` + `cancel` | 전 패키지 |
 | `sync.RWMutex` 읽기/쓰기 분리 | 전 패키지 |
 | 하트비트 기반 자동 재연결 | tcpnet, serialport |
-| 핸들러 함수 주입 패턴 | tcpnet, serialport |
-| 빌더 패턴 | tcpnet/serializer |
+| 핑퐁 기반 생존 확인 | udpnet |
+| 핸들러 함수 주입 패턴 | tcpnet, udpnet, serialport |
+| 핸들러 고루틴 패닉 복구 + 훅 | tcpnet, udpnet |
+| 빌더 패턴 | tcpnet/serializer, udpnet/serializer |
