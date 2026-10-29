@@ -2,25 +2,31 @@ package tcpmd
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"sync"
 )
 
-type Reply interface {
+var (
+	ErrContextClosed    = errors.New("closed conn context")
+	ErrNoPendingRequest = errors.New("no pending request for key")
+	ErrResponseBusy     = errors.New("response channel is full or has no receiver")
+)
+
+type Response interface {
 	GetPayload() any
 	GetErr() error
 }
 
-type GenericReply[T any] struct {
+type GenericResponse[T any] struct {
 	Payload T
 	Err     error
 }
 
-func (r *GenericReply[T]) GetPayload() any {
+func (r *GenericResponse[T]) GetPayload() any {
 	return r.Payload
 }
 
-func (r *GenericReply[T]) GetErr() error {
+func (r *GenericResponse[T]) GetErr() error {
 	return r.Err
 }
 
@@ -59,32 +65,50 @@ func (p *GenericParseMsg[T, K]) GetPacket() any {
 	return p.packet
 }
 
-type ReplyChannelManager struct {
+type PendingRequests struct {
 	mu       sync.RWMutex
-	channels map[any]chan Reply
+	channels map[any]chan Response
 }
 
-func (m *ReplyChannelManager) Get(key any) (chan Reply, bool) {
+func (m *PendingRequests) Get(key any) (chan Response, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	reply, exists := m.channels[key]
-	return reply, exists
+	ch, exists := m.channels[key]
+	return ch, exists
 }
 
-func (m *ReplyChannelManager) Set(key any, ch chan Reply) {
+func (m *PendingRequests) Register(key any, ch chan Response) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.channels[key] = ch
 }
 
+// 대기 중인 요청에 응답을 전달함. Cancel/CancelAll과 동시에 호출되어도 안전함.
+// Get으로 얻은 채널에 직접 보내면 Cancel과 경합 시 panic이 발생할 수 있으므로 Resolve 사용을 권장.
+// 수신자가 없거나 버퍼가 가득 찬 경우 블로킹하지 않고 ErrResponseBusy를 반환함.
+func (m *PendingRequests) Resolve(key any, resp Response) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	ch, exists := m.channels[key]
+	if !exists {
+		return ErrNoPendingRequest
+	}
+	select {
+	case ch <- resp:
+		return nil
+	default:
+		return ErrResponseBusy
+	}
+}
+
 // 채널을 닫지 않고 맵에서 정리
-func (m *ReplyChannelManager) Del(key any) {
+func (m *PendingRequests) Remove(key any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.channels, key)
 }
 
-func (m *ReplyChannelManager) Close(key any) {
+func (m *PendingRequests) Cancel(key any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if ch, exists := m.channels[key]; exists {
@@ -93,7 +117,7 @@ func (m *ReplyChannelManager) Close(key any) {
 	}
 }
 
-func (m *ReplyChannelManager) CloseAll() {
+func (m *PendingRequests) CancelAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -104,21 +128,23 @@ func (m *ReplyChannelManager) CloseAll() {
 }
 
 type ConnContext struct {
-	context      context.Context
-	parseMsg     chan ParseMsg
-	replyManager *ReplyChannelManager
+	context  context.Context
+	parseMsg chan ParseMsg
+	pending  *PendingRequests
 
-	// for parseMsg
+	// parseMsg 채널은 닫지 않고 done으로 종료를 알림 (send on closed channel 방지)
 	mu     sync.RWMutex
 	closed bool
+	done   chan struct{}
 }
 
 func NewConnContext(ctx context.Context, msgChannelSize int) *ConnContext {
 	return &ConnContext{
 		context:  ctx,
 		parseMsg: make(chan ParseMsg, msgChannelSize),
-		replyManager: &ReplyChannelManager{
-			channels: make(map[any]chan Reply),
+		done:     make(chan struct{}),
+		pending: &PendingRequests{
+			channels: make(map[any]chan Response),
 		},
 	}
 }
@@ -129,10 +155,7 @@ func (c *ConnContext) GetContext() context.Context {
 
 func (c *ConnContext) GetParsedMsg() (ParseMsg, bool) {
 	select {
-	case msg, ok := <-c.parseMsg:
-		if !ok {
-			return nil, false
-		}
+	case msg := <-c.parseMsg:
 		return msg, true
 	default:
 		return nil, false
@@ -140,32 +163,31 @@ func (c *ConnContext) GetParsedMsg() (ParseMsg, bool) {
 }
 
 func (c *ConnContext) SetParsedMsg(msg ParseMsg) error {
-	c.mu.RLock()
-	ch := c.parseMsg
-	c.mu.RUnlock()
-
-	if ch == nil {
-		return fmt.Errorf("cancelled client context")
+	select {
+	case <-c.done:
+		return ErrContextClosed
+	default:
 	}
 
 	select {
 	case c.parseMsg <- msg:
-	case <-c.context.Done():
 		return nil
+	case <-c.done:
+		return ErrContextClosed
+	case <-c.context.Done():
+		return c.context.Err()
 	}
-
-	return nil
 }
 
-func (c *ConnContext) GetReplyChannel() *ReplyChannelManager {
-	return c.replyManager
+func (c *ConnContext) GetPending() *PendingRequests {
+	return c.pending
 }
 
 func (c *ConnContext) NewHandleContext(msg ParseMsg) *HandleContext {
 	return &HandleContext{
-		context:      c.context,
-		parseMsg:     msg,
-		replyManager: c.replyManager,
+		context:  c.context,
+		parseMsg: msg,
+		pending:  c.pending,
 	}
 }
 
@@ -176,19 +198,17 @@ func (c *ConnContext) Close() error {
 		return nil
 	}
 	c.closed = true
-	parseChan := c.parseMsg
-	c.parseMsg = nil
+	close(c.done)
 	c.mu.Unlock()
 
-	c.replyManager.CloseAll()
-	close(parseChan)
+	c.pending.CancelAll()
 	return nil
 }
 
 type HandleContext struct {
-	context      context.Context
-	parseMsg     ParseMsg
-	replyManager *ReplyChannelManager
+	context  context.Context
+	parseMsg ParseMsg
+	pending  *PendingRequests
 }
 
 func (c *HandleContext) GetContext() context.Context {
@@ -199,6 +219,6 @@ func (c *HandleContext) GetParseMsg() ParseMsg {
 	return c.parseMsg
 }
 
-func (c *HandleContext) GetReplyChannel() *ReplyChannelManager {
-	return c.replyManager
+func (c *HandleContext) GetPending() *PendingRequests {
+	return c.pending
 }

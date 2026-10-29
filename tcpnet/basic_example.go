@@ -6,7 +6,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/Jaeun-Choi98/modules/tcpnet/basic/client"
@@ -20,7 +19,6 @@ type CustomClient struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
-	wg     sync.WaitGroup
 }
 
 func NewCustomClient(parentCtx context.Context, timeout, reconnect time.Duration) *CustomClient {
@@ -39,7 +37,8 @@ func NewCustomClient(parentCtx context.Context, timeout, reconnect time.Duration
 
 func (c *CustomClient) implHandleConnection() {
 	c.BaseClient.SetHandleConnectFunc(func(conn net.Conn) {
-		defer c.wg.Done()
+		// 스트림 버퍼를 유지하기 위해 reader는 연결당 한 번만 생성
+		reader := bufio.NewReader(conn)
 		for {
 
 			select {
@@ -56,7 +55,7 @@ func (c *CustomClient) implHandleConnection() {
 			conn.SetReadDeadline(time.Now().Add(15 * time.Second))
 
 			// =============== parser space =============== //
-			parsedPacket, err := bufio.NewReader(conn).ReadString('\n')
+			parsedPacket, err := reader.ReadString('\n')
 			// =============== parser space =============== //
 
 			if err != nil {
@@ -84,6 +83,7 @@ func (c *CustomClient) Start() error {
 }
 
 func (c *CustomClient) Shutdown() {
+	c.cancel()
 	c.BaseClient.Shutdown()
 }
 

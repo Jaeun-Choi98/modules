@@ -2,16 +2,19 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"log"
+	"runtime/debug"
 	"sync"
 
 	tcpmd "github.com/Jaeun-Choi98/modules/tcpnet/advanced/model"
 )
 
 var (
-	errNotExistsHandlerType = errors.New("not exsits registered handler about packet.GetPacketId")
+	errNotExistsHandlerType = errors.New("not exists registered handler about packet.GetPacketId")
 	errNilHandler           = errors.New("nil handler")
-	errNotExistsMsg         = errors.New("not exists parsed massage")
+	errNotExistsMsg         = errors.New("not exists parsed message")
+	errInvalidPacketIdType  = errors.New("invalid packet id type")
 )
 
 type MsgType interface {
@@ -46,29 +49,41 @@ func New[T MsgType]() *Manager[T] {
 	}
 }
 
-func (h *Manager[T]) HandleMessage(c *tcpmd.ConnContext) error {
+func (h *Manager[T]) lookup(msg tcpmd.ParseMsg) (HandlerInterface, error) {
+	packetId, ok := msg.GetPacketId().(T)
+	if !ok {
+		var zero T
+		return nil, fmt.Errorf("%w: got %T, want %T", errInvalidPacketIdType, msg.GetPacketId(), zero)
+	}
 
+	h.mu.RLock()
+	handler, exists := h.handlers[packetId]
+	h.mu.RUnlock()
+
+	if !exists {
+		return nil, errNotExistsHandlerType
+	}
+	if handler == nil {
+		return nil, errNilHandler
+	}
+	return handler, nil
+}
+
+func (h *Manager[T]) HandleMessage(c *tcpmd.ConnContext) error {
 	msg, ok := c.GetParsedMsg()
 	if !ok {
 		return errNotExistsMsg
 	}
 
-	h.mu.RLock()
-	handler, exists := h.handlers[msg.GetPacketId().(T)]
-	h.mu.RUnlock()
-
-	if !exists {
-		return errNotExistsHandlerType
-	}
-
-	if handler == nil {
-		return errNilHandler
+	handler, err := h.lookup(msg)
+	if err != nil {
+		return err
 	}
 
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Println("panic in handling packet")
+				log.Printf("panic in handling packet: %v\n%s", r, debug.Stack())
 			}
 		}()
 		if err := handler.handle(c.NewHandleContext(msg)); err != nil {
@@ -78,10 +93,12 @@ func (h *Manager[T]) HandleMessage(c *tcpmd.ConnContext) error {
 	return nil
 }
 
-func (h *Manager[T]) HandleMessageSync(c *tcpmd.ConnContext) error {
+// 핸들러에서 panic이 발생하면 error로 변환해 반환함.
+func (h *Manager[T]) HandleMessageSync(c *tcpmd.ConnContext) (rstErr error) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Println("panic in handling packet")
+			log.Printf("panic in handling packet: %v\n%s", r, debug.Stack())
+			rstErr = fmt.Errorf("panic in handling packet: %v", r)
 		}
 	}()
 
@@ -90,29 +107,34 @@ func (h *Manager[T]) HandleMessageSync(c *tcpmd.ConnContext) error {
 		return errNotExistsMsg
 	}
 
-	h.mu.RLock()
-	handler, exists := h.handlers[msg.GetPacketId().(T)]
-	h.mu.RUnlock()
-
-	if !exists {
-		return errNotExistsHandlerType
-	}
-
-	if handler == nil {
-		return errNilHandler
+	handler, err := h.lookup(msg)
+	if err != nil {
+		return err
 	}
 
 	if err := handler.handle(c.NewHandleContext(msg)); err != nil {
 		log.Printf("error in handling packet: %+v", err)
 	}
-
 	return nil
 }
 
+// packetId 타입이 Manager의 T와 다르면 등록 시점에 panic (http.HandleFunc와 같은 프로그래머 오류 처리).
 func (h *Manager[T]) RegisterHandle(packetId any, handle HandlerFunc) {
-	h.handlers[packetId.(T)] = handle
+	h.register(packetId, handle)
 }
 
 func (h *Manager[T]) RegisterHandler(packetId any, handler HandlerInterface) {
-	h.handlers[packetId.(T)] = handler
+	h.register(packetId, handler)
+}
+
+func (h *Manager[T]) register(packetId any, handler HandlerInterface) {
+	id, ok := packetId.(T)
+	if !ok {
+		var zero T
+		panic(fmt.Sprintf("handler: invalid packet id type %T, want %T", packetId, zero))
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.handlers[id] = handler
 }

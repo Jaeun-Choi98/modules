@@ -72,12 +72,21 @@ func (c *ClientBase) Connect() error {
 		return fmt.Errorf("need ip and port. call SetIpAndPort")
 	}
 
+	// Shutdown 이후 heartbeat가 재연결하는 것을 방지
+	if err := c.ctx.Err(); err != nil {
+		return err
+	}
+
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf(`%s:%s`, c.ip, c.port), c.connectTimeout)
 	if err != nil {
 		log.Println(err)
 		return err
 	}
 
+	// 재연결 시 이전 연결 누수 방지
+	if c.conn != nil {
+		c.conn.Close()
+	}
 	c.conn = conn
 	c.isConnected = true
 	return nil
@@ -93,7 +102,11 @@ func (c *ClientBase) Start() (rstErr error) {
 		}
 	}()
 
-	if c.handleConnectFunc == nil {
+	c.mu.RLock()
+	handleConnectFunc := c.handleConnectFunc
+	c.mu.RUnlock()
+
+	if handleConnectFunc == nil {
 		rstErr = fmt.Errorf("handle connect func is nil")
 		return
 	}
@@ -104,7 +117,11 @@ func (c *ClientBase) Start() (rstErr error) {
 		return
 	}
 
-	c.handleConnectFunc(c.conn)
+	c.mu.RLock()
+	conn := c.conn
+	c.mu.RUnlock()
+
+	handleConnectFunc(conn)
 	return nil
 }
 
@@ -113,12 +130,20 @@ func (c *ClientBase) SendMessage(msg []byte, timeout time.Duration) error {
 		timeout = 5 * time.Second
 	}
 
-	c.conn.SetWriteDeadline(time.Now().Add(timeout))
-	defer c.conn.SetWriteDeadline(time.Time{})
+	c.mu.RLock()
+	conn := c.conn
+	c.mu.RUnlock()
+
+	if conn == nil {
+		return fmt.Errorf("not connected")
+	}
+
+	conn.SetWriteDeadline(time.Now().Add(timeout))
+	defer conn.SetWriteDeadline(time.Time{})
 
 	written := 0
 	for written < len(msg) {
-		n, err := c.conn.Write(msg[written:])
+		n, err := conn.Write(msg[written:])
 		if err != nil {
 			return err
 		}
@@ -130,13 +155,16 @@ func (c *ClientBase) SendMessage(msg []byte, timeout time.Duration) error {
 func (c *ClientBase) Shutdown() error {
 	c.cancel()
 
+	c.mu.Lock()
 	c.isConnected = false
+	var err error
 	if c.conn != nil {
-		return c.conn.Close()
+		err = c.conn.Close()
 	}
+	c.mu.Unlock()
 
 	c.wg.Wait()
-	return nil
+	return err
 }
 
 func (c *ClientBase) StartTCPClientHeartbeat() {
