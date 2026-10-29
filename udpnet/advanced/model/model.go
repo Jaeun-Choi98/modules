@@ -2,23 +2,29 @@ package udpmd
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"net"
 	"sync"
 )
 
-type Reply interface {
+var (
+	ErrContextClosed    = errors.New("closed session context")
+	ErrNoPendingRequest = errors.New("no pending request for key")
+	ErrResponseBusy     = errors.New("response channel is full or has no receiver")
+)
+
+type Response interface {
 	GetPayload() any
 	GetErr() error
 }
 
-type GenericReply[T any] struct {
+type GenericResponse[T any] struct {
 	Payload T
 	Err     error
 }
 
-func (r *GenericReply[T]) GetPayload() any { return r.Payload }
-func (r *GenericReply[T]) GetErr() error   { return r.Err }
+func (r *GenericResponse[T]) GetPayload() any { return r.Payload }
+func (r *GenericResponse[T]) GetErr() error   { return r.Err }
 
 type ParseMsg interface {
 	GetAddr() *net.UDPAddr
@@ -44,31 +50,49 @@ func (p *GenericParseMsg[T, K]) GetAddr() *net.UDPAddr { return p.addr }
 func (p *GenericParseMsg[T, K]) GetPacketId() any      { return p.packetId }
 func (p *GenericParseMsg[T, K]) GetPacket() any        { return p.packet }
 
-type ReplyChannelManager struct {
+type PendingRequests struct {
 	mu       sync.RWMutex
-	channels map[any]chan Reply
+	channels map[any]chan Response
 }
 
-func (m *ReplyChannelManager) Get(key any) (chan Reply, bool) {
+func (m *PendingRequests) Get(key any) (chan Response, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	ch, exists := m.channels[key]
 	return ch, exists
 }
 
-func (m *ReplyChannelManager) Set(key any, ch chan Reply) {
+func (m *PendingRequests) Register(key any, ch chan Response) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.channels[key] = ch
 }
 
-func (m *ReplyChannelManager) Del(key any) {
+// 대기 중인 요청에 응답을 전달함. Cancel/CancelAll과 동시에 호출되어도 안전함.
+// Get으로 얻은 채널에 직접 보내면 Cancel과 경합 시 panic이 발생할 수 있으므로 Resolve 사용을 권장.
+// 수신자가 없거나 버퍼가 가득 찬 경우 블로킹하지 않고 ErrResponseBusy를 반환함.
+func (m *PendingRequests) Resolve(key any, resp Response) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	ch, exists := m.channels[key]
+	if !exists {
+		return ErrNoPendingRequest
+	}
+	select {
+	case ch <- resp:
+		return nil
+	default:
+		return ErrResponseBusy
+	}
+}
+
+func (m *PendingRequests) Remove(key any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.channels, key)
 }
 
-func (m *ReplyChannelManager) Close(key any) {
+func (m *PendingRequests) Cancel(key any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if ch, exists := m.channels[key]; exists {
@@ -77,7 +101,7 @@ func (m *ReplyChannelManager) Close(key any) {
 	}
 }
 
-func (m *ReplyChannelManager) CloseAll() {
+func (m *PendingRequests) CancelAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for key, ch := range m.channels {
@@ -86,40 +110,45 @@ func (m *ReplyChannelManager) CloseAll() {
 	}
 }
 
-// SessionContext는 *net.UDPAddr 기준으로 관리되는 per-client 세션.
-// TCP의 ConnContext에 대응하며, conn과 addr을 함께 보유해 핸들러에서 응답 전송 가능.
-type SessionContext struct {
-	context      context.Context
-	conn         *net.UDPConn
-	addr         *net.UDPAddr
-	parseMsg     chan ParseMsg
-	replyManager *ReplyChannelManager
-	mu           sync.RWMutex
-	closed       bool
+// 송신 인터페이스. udpnet.Endpoint가 구현하며, 송신 소켓 분리(SendBindAddr)가 적용됨.
+type Sender interface {
+	SendTo(data []byte, addr *net.UDPAddr) error
 }
 
-func NewSessionContext(ctx context.Context, conn *net.UDPConn, addr *net.UDPAddr, msgChannelSize int) *SessionContext {
+// SessionContext는 *net.UDPAddr 기준으로 관리되는 per-peer 세션.
+// sender와 addr을 함께 보유해 핸들러에서 응답 전송 가능.
+type SessionContext struct {
+	context  context.Context
+	sender   Sender
+	addr     *net.UDPAddr
+	parseMsg chan ParseMsg
+	pending  *PendingRequests
+
+	// parseMsg 채널은 닫지 않고 done으로 종료를 알림 (send on closed channel 방지)
+	mu     sync.RWMutex
+	closed bool
+	done   chan struct{}
+}
+
+func NewSessionContext(ctx context.Context, sender Sender, addr *net.UDPAddr, msgChannelSize int) *SessionContext {
 	return &SessionContext{
-		context: ctx,
-		conn:    conn,
-		addr:    addr,
+		context:  ctx,
+		sender:   sender,
+		addr:     addr,
 		parseMsg: make(chan ParseMsg, msgChannelSize),
-		replyManager: &ReplyChannelManager{
-			channels: make(map[any]chan Reply),
+		done:     make(chan struct{}),
+		pending: &PendingRequests{
+			channels: make(map[any]chan Response),
 		},
 	}
 }
 
 func (s *SessionContext) GetContext() context.Context { return s.context }
 func (s *SessionContext) GetAddr() *net.UDPAddr       { return s.addr }
-func (s *SessionContext) GetConn() *net.UDPConn       { return s.conn }
 
 func (s *SessionContext) GetParsedMsg() (ParseMsg, bool) {
 	select {
-	case msg, ok := <-s.parseMsg:
-		if !ok {
-			return nil, false
-		}
+	case msg := <-s.parseMsg:
 		return msg, true
 	default:
 		return nil, false
@@ -127,32 +156,33 @@ func (s *SessionContext) GetParsedMsg() (ParseMsg, bool) {
 }
 
 func (s *SessionContext) SetParsedMsg(msg ParseMsg) error {
-	s.mu.RLock()
-	ch := s.parseMsg
-	s.mu.RUnlock()
-
-	if ch == nil {
-		return fmt.Errorf("cancelled session context")
+	select {
+	case <-s.done:
+		return ErrContextClosed
+	default:
 	}
 
 	select {
 	case s.parseMsg <- msg:
+		return nil
+	case <-s.done:
+		return ErrContextClosed
 	case <-s.context.Done():
+		return s.context.Err()
 	}
-	return nil
 }
 
-func (s *SessionContext) GetReplyChannel() *ReplyChannelManager {
-	return s.replyManager
+func (s *SessionContext) GetPending() *PendingRequests {
+	return s.pending
 }
 
 func (s *SessionContext) NewHandleContext(msg ParseMsg) *HandleContext {
 	return &HandleContext{
-		context:      s.context,
-		conn:         s.conn,
-		addr:         s.addr,
-		parseMsg:     msg,
-		replyManager: s.replyManager,
+		context:  s.context,
+		sender:   s.sender,
+		addr:     s.addr,
+		parseMsg: msg,
+		pending:  s.pending,
 	}
 }
 
@@ -163,29 +193,35 @@ func (s *SessionContext) Close() error {
 		return nil
 	}
 	s.closed = true
-	parseChan := s.parseMsg
-	s.parseMsg = nil
+	close(s.done)
 	s.mu.Unlock()
 
-	s.replyManager.CloseAll()
-	close(parseChan)
+	s.pending.CancelAll()
 	return nil
 }
 
 type HandleContext struct {
-	context      context.Context
-	conn         *net.UDPConn
-	addr         *net.UDPAddr
-	parseMsg     ParseMsg
-	replyManager *ReplyChannelManager
+	context  context.Context
+	sender   Sender
+	addr     *net.UDPAddr
+	parseMsg ParseMsg
+	pending  *PendingRequests
 }
 
-func (c *HandleContext) GetContext() context.Context        { return c.context }
-func (c *HandleContext) GetParseMsg() ParseMsg              { return c.parseMsg }
-func (c *HandleContext) GetReplyChannel() *ReplyChannelManager { return c.replyManager }
-func (c *HandleContext) GetAddr() *net.UDPAddr              { return c.addr }
+func (c *HandleContext) GetContext() context.Context  { return c.context }
+func (c *HandleContext) GetParseMsg() ParseMsg        { return c.parseMsg }
+func (c *HandleContext) GetPending() *PendingRequests { return c.pending }
+func (c *HandleContext) GetAddr() *net.UDPAddr        { return c.addr }
 
+// 이 패킷의 출발지 주소(GetAddr)로 전송.
 func (c *HandleContext) Send(data []byte) error {
-	_, err := c.conn.WriteToUDP(data, c.addr)
-	return err
+	return c.SendTo(data, c.addr)
+}
+
+// 임의 주소로 전송. 상대가 송신 포트와 다른 포트에서 수신할 때 사용.
+func (c *HandleContext) SendTo(data []byte, addr *net.UDPAddr) error {
+	if c.sender == nil {
+		return errors.New("nil sender")
+	}
+	return c.sender.SendTo(data, addr)
 }
