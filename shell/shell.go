@@ -3,10 +3,25 @@ package shell
 import (
 	"bufio"
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
+)
+
+var (
+	invalidChars = map[rune]bool{
+		';':    true,
+		'&':    true,
+		'|':    true,
+		'`':    true,
+		'$':    true,
+		'\x00': true, // NUL 문자
+	}
+
+	InvalidCharErr = errors.New(`contains invalid character`)
 )
 
 type ScriptResult struct {
@@ -91,4 +106,13 @@ func (se *ScriptExecutor) Execute(ctx context.Context, shellName, scriptName, co
 	result.Error = err
 
 	return result, nil
+}
+
+func ValidateFilename(name string) error {
+	for _, ch := range name {
+		if invalidChars[ch] {
+			return fmt.Errorf("%w: '%c'", InvalidCharErr, ch)
+		}
+	}
+	return nil
 }
